@@ -171,11 +171,11 @@ export function extrairDiaDaSemana(nomeDaTurma: string): string {
   const partes = nomeDaTurma.split("_");
   const diasValidos = [
     "SEGUNDA",
-    "TERCA",
+    "TERÇA",
     "QUARTA",
     "QUINTA",
     "SEXTA",
-    "SABADO",
+    "SÁBADO",
     "DOMINGO",
   ];
 
@@ -223,11 +223,11 @@ export function gerarPresencasParaAluno(diaDaSemana: string): Presencas {
   const ano = new Date().getFullYear(); // Ano corrente
   const diasDaSemana: DiasDaSemanaMap = {
     SEGUNDA: 1,
-    TERCA: 2,
+    TERÇA: 2,
     QUARTA: 3,
     QUINTA: 4,
     SEXTA: 5,
-    SABADO: 6,
+    SÁBADO: 6,
     DOMINGO: 0,
   };
 
@@ -286,11 +286,11 @@ export function gerarPresencasParaAlunoSemestre(
 ): Presencas {
   const diasDaSemana: DiasDaSemanaMap = {
     SEGUNDA: 1,
-    TERCA: 2,
+    TERÇA: 2,
     QUARTA: 3,
     QUINTA: 4,
     SEXTA: 5,
-    SABADO: 6,
+    SÁBADO: 6,
     DOMINGO: 0,
   };
 
