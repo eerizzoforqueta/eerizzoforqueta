@@ -26,7 +26,13 @@ import { useData } from '@/context/context';
 import { BoxStyleCadastro } from '@/utils/Styles';
 import Layout from '@/components/TopBarComponents/Layout';
 
-function TabPanel(props: any) {
+interface TabPanelProps {
+  children?: React.ReactNode;
+  value: number;
+  index: number;
+}
+
+function TabPanel(props: TabPanelProps) {
   const { children, value, index, ...other } = props;
   return (
     <div
@@ -50,7 +56,7 @@ export default function ManageTurmas() {
   const [tabIndex, setTabIndex] = useState(0);
   const [modalidades, setModalidades] = useState<Modalidade[]>([]);
   const [selectedModalidade, setSelectedModalidade] = useState<string>('');
-  // Alteramos o estado para undefined em vez de null para selectedTurma
+  // Inicializamos selectedTurma como undefined
   const [turmas, setTurmas] = useState<Turma[]>([]);
   const [selectedTurma, setSelectedTurma] = useState<Turma | undefined>(undefined);
   const [formValues, setFormValues] = useState<Omit<Turma, 'uuidTurma' | 'nome_da_turma' | 'capacidade_atual_da_turma' | 'contadorAlunos' | 'alunos'>>({
@@ -77,7 +83,7 @@ export default function ManageTurmas() {
     });
   }, [fetchModalidades]);
 
-  // Aqui convertemos modalidadeEscolhida.turmas em array, caso venha como objeto
+  // Converte modalidadeEscolhida.turmas para array caso não seja, garantindo o tipo Turma[]
   useEffect(() => {
     if (selectedModalidade) {
       const modalidadeEscolhida = modalidades.find(
@@ -87,7 +93,7 @@ export default function ManageTurmas() {
         modalidadeEscolhida && modalidadeEscolhida.turmas
           ? Array.isArray(modalidadeEscolhida.turmas)
             ? modalidadeEscolhida.turmas
-            : Object.values(modalidadeEscolhida.turmas)
+            : (Object.values(modalidadeEscolhida.turmas) as Turma[])
           : [];
       setTurmas(turmasArray);
     }
@@ -246,15 +252,7 @@ export default function ManageTurmas() {
                   ))}
                 </Select>
               </FormControl>
-              <TextField
-                label="Núcleo"
-                name="nucleo"
-                value={formValues.nucleo}
-                onChange={handleInputChange}
-                required
-                fullWidth
-                margin="normal"
-              />
+              <TextField label="Núcleo" name="nucleo" value={formValues.nucleo} onChange={handleInputChange} required fullWidth margin="normal" />
               <FormControl fullWidth margin="normal">
                 <InputLabel>Categoria</InputLabel>
                 <Select name="categoria" value={formValues.categoria} onChange={handleSelectChange} required>
@@ -275,39 +273,15 @@ export default function ManageTurmas() {
                   ))}
                 </Select>
               </FormControl>
-              <TextField
-                label="Horário"
-                name="horario"
-                value={formValues.horario}
-                onChange={handleInputChange}
-                required
-                fullWidth
-                margin="normal"
-              />
-              <TextField
-                type="number"
-                label="Capacidade Máxima"
-                name="capacidade_maxima_da_turma"
-                value={formValues.capacidade_maxima_da_turma.toString()}
-                onChange={handleInputChange}
-                required
-                fullWidth
-                margin="normal"
-              />
+              <TextField label="Horário" name="horario" value={formValues.horario} onChange={handleInputChange} required fullWidth margin="normal" />
+              <TextField type="number" label="Capacidade Máxima" name="capacidade_maxima_da_turma" value={formValues.capacidade_maxima_da_turma.toString()} onChange={handleInputChange} required fullWidth margin="normal" />
               {capacidadeInvalida && (
                 <Typography color="error" variant="body2">
                   A capacidade máxima não pode ser menor que o número atual de alunos (
                   {selectedTurma?.capacidade_atual_da_turma}).
                 </Typography>
               )}
-              <TextField
-                label="Nome da Turma"
-                value={nomeTurma}
-                onChange={() => {}}
-                fullWidth
-                margin="normal"
-                disabled
-              />
+              <TextField label="Nome da Turma" value={nomeTurma} onChange={() => {}} fullWidth margin="normal" disabled />
               <Button type="submit" variant="contained" color="primary" disabled={loading || capacidadeInvalida}>
                 Criar Turma
               </Button>
@@ -337,15 +311,7 @@ export default function ManageTurmas() {
             </FormControl>
             {selectedTurma && (
               <form onSubmit={handleSubmit}>
-                <TextField
-                  label="Núcleo"
-                  name="nucleo"
-                  value={formValues.nucleo}
-                  onChange={handleInputChange}
-                  required
-                  fullWidth
-                  margin="normal"
-                />
+                <TextField label="Núcleo" name="nucleo" value={formValues.nucleo} onChange={handleInputChange} required fullWidth margin="normal" />
                 <FormControl fullWidth margin="normal">
                   <InputLabel>Categoria</InputLabel>
                   <Select name="categoria" value={formValues.categoria} onChange={handleSelectChange} required>
@@ -366,38 +332,14 @@ export default function ManageTurmas() {
                     ))}
                   </Select>
                 </FormControl>
-                <TextField
-                  label="Horário"
-                  name="horario"
-                  value={formValues.horario}
-                  onChange={handleInputChange}
-                  required
-                  fullWidth
-                  margin="normal"
-                />
-                <TextField
-                  type="number"
-                  label="Capacidade Máxima"
-                  name="capacidade_maxima_da_turma"
-                  value={formValues.capacidade_maxima_da_turma.toString()}
-                  onChange={handleInputChange}
-                  required
-                  fullWidth
-                  margin="normal"
-                />
+                <TextField label="Horário" name="horario" value={formValues.horario} onChange={handleInputChange} required fullWidth margin="normal" />
+                <TextField type="number" label="Capacidade Máxima" name="capacidade_maxima_da_turma" value={formValues.capacidade_maxima_da_turma.toString()} onChange={handleInputChange} required fullWidth margin="normal" />
                 {capacidadeInvalida && (
                   <Typography color="error" variant="body2">
                     A capacidade máxima não pode ser menor que o número atual de alunos ({selectedTurma.capacidade_atual_da_turma}).
                   </Typography>
                 )}
-                <TextField
-                  label="Nome da Turma"
-                  value={nomeTurma}
-                  onChange={() => {}}
-                  fullWidth
-                  margin="normal"
-                  disabled
-                />
+                <TextField label="Nome da Turma" value={nomeTurma} onChange={() => {}} fullWidth margin="normal" disabled />
                 <Button type="submit" variant="contained" color="primary" disabled={loading || capacidadeInvalida}>
                   Atualizar Turma
                 </Button>
@@ -442,6 +384,5 @@ export default function ManageTurmas() {
     </Layout>
   );
 }
-
 
 export { ManageTurmas };
