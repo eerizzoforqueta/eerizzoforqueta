@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
-import React, { useState } from 'react'
+import React, { useState } from 'react';
 import {
   Box,
   Modal,
@@ -15,8 +14,8 @@ import {
   TableRow,
   TableContainer,
   Paper,
-} from '@mui/material'
-import { Aluno, TurmaPresencaSemanalProps } from '@/interface/interfaces'
+} from '@mui/material';
+import { Aluno, TurmaPresencaSemanalProps } from '@/interface/interfaces';
 
 export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
   alunosDaTurma,
@@ -24,52 +23,59 @@ export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
   isOpen,
   onClose,
 }) => {
-  const [selectedMonth, setSelectedMonth] = useState<string>('')
-  const months = ["janeiro",
-    "fevereiro",
-    "março",
-    "abril",
-    "maio",
-    "junho"]
+  // Estado para o mês selecionado (0 para janeiro, 1 para fevereiro, etc.)
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+  // Lista de meses que serão mostrados no seletor
+  const months = ["janeiro", "fevereiro", "março", "abril", "maio", "junho"];
 
-  // Função para contar presenças diárias no mês selecionado
+  /**
+   * Função que calcula o total de presenças (não faltas) para cada dia do mês selecionado.
+   * Ela percorre cada aluno e, para cada entrada de presenças (os dias estão armazenados
+   * com chaves no formato "dia-mês-ano"), se o mês corresponde ao mês selecionado e o aluno estava presente,
+   * incrementa a contagem para aquele dia.
+   *
+   * Observação: Removemos a comparação do ano para que a contagem funcione mesmo que os dados estejam registrados para um ano diferente.
+   */
   const calculateDailyPresences = () => {
-    const monthIndex = parseInt(selectedMonth, 10) + 1 // Ajustando para base-1 (Janeiro = 1)
-    const year = new Date().getFullYear() // Considerando o ano atual para simplificar
+    // Converte o selectedMonth para um número e ajusta para base 1 (0 => janeiro = 1)
+    const monthIndex = parseInt(selectedMonth, 10) + 1;
+    // Inicializa um array com zeros para cada dia do mês selecionado
+    const daysInMonth = new Date(new Date().getFullYear(), monthIndex, 0).getDate();
+    const dailyPresences = Array.from({ length: daysInMonth }, () => 0);
 
-    // Determinar o número de dias no mês selecionado
-    const daysInMonth = new Date(year, monthIndex, 0).getDate()
-    const dailyPresences = Array.from({ length: daysInMonth }, () => 0)
-
+    // Para cada aluno na turma...
     alunosDaTurma.forEach((aluno) => {
-      // Uso da verificação opcional encadeada para evitar erros se aluno for null/undefined
-      // ou se aluno.presencas for null/undefined.
+      // Para cada chave no objeto 'presencas' do aluno (ex: "janeiro", "fevereiro", etc.)
       Object.entries(aluno?.presencas || {}).forEach(([monthKey, days]) => {
-        // Iterar sobre cada dia registrado em presencas
+        // Para cada dia registrado nesse mês
         Object.entries(days).forEach(([dayKey, isPresent]) => {
-          const [day, month, yearKey] = dayKey.split('-').map(Number)
-          if (month === monthIndex && yearKey === year && isPresent) {
-            // Incrementa a contagem para o dia específico
-            dailyPresences[day - 1]++
+          // dayKey esperado no formato "dia-mês-ano" (ex: "10-3-2025")
+          const [day, month, year] = dayKey.split('-').map(Number);
+          // Se o mês extraído for igual ao mês selecionado e o aluno estiver presente
+          if (month === monthIndex && isPresent) {
+            // Incrementa a contagem para o dia específico (ajustando o índice)
+            dailyPresences[day - 1]++;
           }
-        })
-      })
-    })
+        });
+      });
+    });
 
-    // Transformar a lista de presenças diárias em uma lista de objetos com dia e total
+    // Converte o array de presenças em um array de objetos { day, total } apenas com dias que tiveram pelo menos 1 presença
     return dailyPresences
       .map((total, day) => ({
-        day: day + 1, // dia do mês
-        total, // total de presenças nesse dia
+        day: day + 1,
+        total,
       }))
-      .filter((dayObj) => dayObj.total > 0)
-  }
+      .filter((dayObj) => dayObj.total > 0);
+  };
 
+  // Atualiza o estado do mês selecionado
   const handleChangeMonth = (event: SelectChangeEvent) => {
-    setSelectedMonth(event.target.value)
-  }
+    setSelectedMonth(event.target.value);
+  };
 
-  const monthIndex = parseInt(selectedMonth, 10) + 1
+  // Calcula o mês (base 1) a partir do valor selecionado
+  const monthIndex = selectedMonth ? parseInt(selectedMonth, 10) + 1 : 0;
 
   return (
     <Modal open={isOpen} onClose={onClose}>
@@ -79,19 +85,19 @@ export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
           top: '50%',
           left: '50%',
           transform: 'translate(-50%, -50%)',
-          width: 'fit-content', // Ocupar apenas o espaço necessário
+          width: 'fit-content',
           bgcolor: 'background.paper',
           boxShadow: 24,
           p: 4,
           overflowY: 'auto',
-          maxHeight: '80vh', // Ajuste para 80vh para não ocupar toda a altura
+          maxHeight: '80vh',
           '& .MuiTableCell-root': {
-            padding: '8px', // Ajuste no padding para todas as células
-            borderRight: '1px solid rgba(224, 224, 224, 1)', // Adicionando uma borda para separar as células
+            padding: '8px',
+            borderRight: '1px solid rgba(224, 224, 224, 1)',
           },
           '& .MuiTableCell-head': {
-            backgroundColor: '#f5f5f5', // Fundo do cabeçalho da tabela
-            fontWeight: 'bold', // Tornando o cabeçalho em negrito
+            backgroundColor: '#f5f5f5',
+            fontWeight: 'bold',
           },
         }}
       >
@@ -101,7 +107,7 @@ export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
           gutterBottom
           component="div"
         >
-          Total de presenças da turma: {nomeDaTurma} no mês de:{' '}
+          Total de presenças da turma: {nomeDaTurma} no mês de:
         </Typography>
 
         <Select
@@ -117,16 +123,12 @@ export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
             </MenuItem>
           ))}
         </Select>
+
         {selectedMonth && (
           <TableContainer component={Paper}>
-            <Table
-              sx={{ minWidth: 650 }}
-              size="small"
-              aria-label="a dense table"
-            >
+            <Table sx={{ minWidth: 650 }} size="small" aria-label="a dense table">
               <TableHead>
                 <TableRow>
-                  {/* Cabeçalho da tabela com os dias do mês com presenças */}
                   {calculateDailyPresences().map(({ day }) => (
                     <TableCell key={day} align="center">
                       {`${String(day).padStart(2, '0')}/${String(monthIndex).padStart(2, '0')}`}
@@ -136,7 +138,6 @@ export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
               </TableHead>
               <TableBody>
                 <TableRow>
-                  {/* Células com o total de presenças nos dias com presenças */}
                   {calculateDailyPresences().map(({ day, total }) => (
                     <TableCell key={day} align="center">
                       {total} alunos
@@ -158,5 +159,5 @@ export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
         </Button>
       </Box>
     </Modal>
-  )
-}
+  );
+};
