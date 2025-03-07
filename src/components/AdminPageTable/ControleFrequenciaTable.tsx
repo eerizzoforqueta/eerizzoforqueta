@@ -14,6 +14,10 @@ import {
   MenuItem,
   Select,
   SelectChangeEvent,
+  FormControl,
+  FormControlLabel,
+  Radio,
+  RadioGroup,
 } from '@mui/material';
 import { AdminTableProps, Aluno } from '@/interface/interfaces';
 import Modal from '@mui/material/Modal';
@@ -35,42 +39,45 @@ export default function ControleFrequenciaTable({
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down('md'));
 
-  // Lista de meses em minúsculas (para comparar com as chaves em 'presencas')
-  const months = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho'];
+  // Estado para o semestre selecionado: "primeiro" (janeiro a junho) ou "segundo" (julho a dezembro)
+  const [selectedSemester, setSelectedSemester] = useState<'primeiro' | 'segundo'>('primeiro');
 
-  // Filtra os alunos válidos (evitando valores nulos)
-  const validAlunos = useMemo(() => alunosDaTurma.filter(Boolean), [alunosDaTurma]);
+  // Define os meses de acordo com o semestre selecionado
+  const semesterMonths = useMemo(() => {
+    return selectedSemester === 'primeiro'
+      ? ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho']
+      : ['julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  }, [selectedSemester]);
 
-  /**
-   * Retorna o número total de faltas para um aluno em um determinado mês.
-   * Considera que:
-   * - Cada aluno possui um objeto `presencas` com chaves correspondentes aos meses (em minúsculas).
-   * - Cada valor em `presencas[month]` é um objeto com chaves no formato "dia-mês-ano".
-   * - Apenas os dias com valor exatamente false (indicação de ausência) são contados.
-   *
-   * @param aluno - Dados do aluno.
-   * @param month - Nome do mês (ex.: "janeiro").
-   */
+  // Função para contar as faltas de um aluno em um determinado mês.
+  // Apenas os dias cujo valor é exatamente false (indicando ausência) são contados.
   const countAbsencesForStudent = (aluno: Aluno, month: string): number => {
     if (!aluno.presencas || !aluno.presencas[month]) return 0;
-    const days = aluno.presencas[month];
-    // Apenas contar os dias cujo valor seja exatamente false
-    return Object.values(days).filter((value) => value === false).length;
+    const monthData = aluno.presencas[month];
+    return Object.values(monthData).filter(value => value === false).length;
   };
 
-  // Cria os dados para a tabela: para cada aluno, cria um objeto com a propriedade "nome" e, para cada mês, o total de faltas.
+  // Gera os dados da tabela: para cada aluno, cria um objeto com o nome e, para cada mês do semestre, o total de faltas.
   const tableData = useMemo(() => {
-    return validAlunos.map((aluno) => {
-      const row: { nome: string; [key: string]: number | string } = { nome: aluno.nome };
-      months.forEach((month) => {
-        row[month] = countAbsencesForStudent(aluno, month);
+    return alunosDaTurma
+      .filter(Boolean)
+      .map((aluno) => {
+        // Definindo um objeto que tem uma propriedade "nome" e permite outras chaves string com valores numéricos
+        const row: { nome: string; [key: string]: number | string } = { nome: aluno.nome };
+        semesterMonths.forEach((month) => {
+          row[month] = countAbsencesForStudent(aluno, month);
+        });
+        return row;
       });
-      return row;
-    });
-  }, [validAlunos]);
+  }, [alunosDaTurma, semesterMonths]);
+
+  // Função para alterar o semestre selecionado
+  const handleSemesterChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    setSelectedSemester(event.target.value as 'primeiro' | 'segundo');
+  };
 
   return (
-    <Modal open={isOpen} onClose={onClose}>
+    <Modal open={isOpen} onClose={onClose} aria-labelledby="modal-title">
       <Box
         sx={{
           position: 'absolute',
@@ -84,26 +91,30 @@ export default function ControleFrequenciaTable({
           overflowY: 'auto',
           maxHeight: '90vh',
           borderRadius: 2,
-          '& .MuiTableCell-root': {
-            padding: '8px',
-            borderRight: '1px solid rgba(224, 224, 224, 1)',
-          },
-          '& .MuiTableCell-head': {
-            backgroundColor: '#f5f5f5',
-            fontWeight: 'bold',
-          },
         }}
       >
-        <Typography variant="h6" gutterBottom sx={{ color: 'black', mb: 2 }}>
+        <Typography id="modal-title" variant="h6" gutterBottom sx={{ color: 'black', mb: 2 }}>
           Faltas mensais na turma: {nomeDaTurma}
         </Typography>
+
+        {/* Controle para seleção do semestre */}
+        <FormControl component="fieldset" sx={{ mb: 3 }}>
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>Selecione o Semestre:</Typography>
+          <RadioGroup row value={selectedSemester} onChange={handleSemesterChange}>
+            <FormControlLabel value="primeiro" control={<Radio />} label="1º Semestre" />
+            <FormControlLabel value="segundo" control={<Radio />} label="2º Semestre" />
+          </RadioGroup>
+        </FormControl>
+
         <TableContainer component={Paper} sx={{ mb: 2 }}>
           <Table stickyHeader aria-label="Tabela de Faltas Mensais por Aluno">
             <TableHead>
               <TableRow>
-                <TableCell sx={{ fontWeight: 'bold' }}>Aluno</TableCell>
-                {months.map((month) => (
-                  <TableCell key={month} align="center" sx={{ fontWeight: 'bold' }}>
+                <TableCell sx={{ fontWeight: 'bold', bgcolor: theme.palette.primary.main, color: theme.palette.primary.contrastText }}>
+                  Aluno
+                </TableCell>
+                {semesterMonths.map((month) => (
+                  <TableCell key={month} align="center" sx={{ fontWeight: 'bold', bgcolor: theme.palette.primary.main, color: theme.palette.primary.contrastText }}>
                     {month.charAt(0).toUpperCase() + month.slice(1)}
                   </TableCell>
                 ))}
@@ -114,7 +125,7 @@ export default function ControleFrequenciaTable({
                 tableData.map((row, index) => (
                   <TableRow key={index} sx={{ bgcolor: index % 2 === 0 ? 'background.default' : 'grey.100' }}>
                     <TableCell>{row.nome}</TableCell>
-                    {months.map((month) => (
+                    {semesterMonths.map((month) => (
                       <TableCell key={month} align="center">
                         {row[month]} faltas
                       </TableCell>
@@ -123,7 +134,7 @@ export default function ControleFrequenciaTable({
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={months.length + 1} align="center">
+                  <TableCell colSpan={semesterMonths.length + 1} align="center">
                     Nenhum aluno encontrado nesta turma.
                   </TableCell>
                 </TableRow>
@@ -131,6 +142,7 @@ export default function ControleFrequenciaTable({
             </TableBody>
           </Table>
         </TableContainer>
+
         <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
           <Button onClick={onClose} variant="contained" color="error">
             Fechar
