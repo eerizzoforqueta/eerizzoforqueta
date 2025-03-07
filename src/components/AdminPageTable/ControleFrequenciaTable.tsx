@@ -35,7 +35,7 @@ export default function ControleFrequenciaTable({
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down('md'));
 
-  // Lista de meses (em minúsculas para comparar com as chaves de presenças)
+  // Lista de meses em minúsculas (para comparar com as chaves em 'presencas')
   const months = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho'];
 
   // Filtra os alunos válidos (evitando valores nulos)
@@ -43,19 +43,24 @@ export default function ControleFrequenciaTable({
 
   /**
    * Retorna o número total de faltas para um aluno em um determinado mês.
+   * Considera que:
+   * - Cada aluno possui um objeto `presencas` com chaves correspondentes aos meses (em minúsculas).
+   * - Cada valor em `presencas[month]` é um objeto com chaves no formato "dia-mês-ano".
+   * - Apenas os dias com valor exatamente false (indicação de ausência) são contados.
+   *
    * @param aluno - Dados do aluno.
-   * @param month - Nome do mês em minúsculas, ex: "janeiro".
+   * @param month - Nome do mês (ex.: "janeiro").
    */
   const countAbsencesForStudent = (aluno: Aluno, month: string): number => {
     if (!aluno.presencas || !aluno.presencas[month]) return 0;
     const days = aluno.presencas[month];
-    return Object.values(days).filter((value) => !Boolean(value)).length;
+    // Apenas contar os dias cujo valor seja exatamente false
+    return Object.values(days).filter((value) => value === false).length;
   };
 
-  // Cria os dados para a tabela: para cada aluno, cria um objeto com a propriedade "nome" e as chaves para cada mês.
+  // Cria os dados para a tabela: para cada aluno, cria um objeto com a propriedade "nome" e, para cada mês, o total de faltas.
   const tableData = useMemo(() => {
     return validAlunos.map((aluno) => {
-      // Declara um objeto com assinatura de índice para permitir outras propriedades
       const row: { nome: string; [key: string]: number | string } = { nome: aluno.nome };
       months.forEach((month) => {
         row[month] = countAbsencesForStudent(aluno, month);
