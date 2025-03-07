@@ -25,7 +25,12 @@ export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
   onClose,
 }) => {
   const [selectedMonth, setSelectedMonth] = useState<string>('')
-  const months = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
+  const months = ["janeiro",
+    "fevereiro",
+    "março",
+    "abril",
+    "maio",
+    "junho"]
 
   // Função para contar presenças diárias no mês selecionado
   const calculateDailyPresences = () => {
