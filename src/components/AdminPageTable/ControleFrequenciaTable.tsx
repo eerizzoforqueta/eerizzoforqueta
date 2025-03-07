@@ -1,28 +1,37 @@
-import React, { useState, useMemo } from 'react';
 import {
-  Box,
-  Modal,
-  Typography,
-  Button,
-  Select,
-  MenuItem,
-  SelectChangeEvent,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
   TableContainer,
   Paper,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody,
+  Button,
+  Box,
+  Typography,
+  useTheme,
+  useMediaQuery,
+  MenuItem,
+  Select,
+  SelectChangeEvent,
 } from '@mui/material';
-import { Aluno, TurmaPresencaSemanalProps } from '@/interface/interfaces';
+import { AdminTableProps, Aluno } from '@/interface/interfaces';
+import Modal from '@mui/material/Modal';
+import React, { useState,useMemo } from 'react';
+// Props adicionais para o modal
+interface ControleFrequenciaTableProps extends AdminTableProps {
+  isOpen: boolean;
+  onClose: () => void;
+}
 
-export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
+const months = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho'];
+
+export default function ControleFrequenciaTable({
   alunosDaTurma,
   nomeDaTurma,
   isOpen,
   onClose,
-}) => {
+}: ControleFrequenciaTableProps) {
   // Estado para o mês selecionado (valor será o índice do mês como string: "0" para janeiro, "1" para fevereiro, etc.)
   const [selectedMonth, setSelectedMonth] = useState<string>('');
   
