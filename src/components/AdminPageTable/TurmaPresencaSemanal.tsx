@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Box,
   Modal,
@@ -6,7 +6,6 @@ import {
   Button,
   Select,
   MenuItem,
-  SelectChangeEvent,
   Table,
   TableBody,
   TableCell,
@@ -14,6 +13,7 @@ import {
   TableRow,
   TableContainer,
   Paper,
+  SelectChangeEvent,
 } from '@mui/material';
 import { Aluno, TurmaPresencaSemanalProps } from '@/interface/interfaces';
 
@@ -23,58 +23,62 @@ export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
   isOpen,
   onClose,
 }) => {
-  // Estado para o mês selecionado (0 para janeiro, 1 para fevereiro, etc.)
   const [selectedMonth, setSelectedMonth] = useState<string>('');
-  // Lista de meses que serão mostrados no seletor
-  const months = ["janeiro", "fevereiro", "março", "abril", "maio", "junho"];
+  const months = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',"julho",
+    "agosto",
+    "setembro",
+    "outubro",
+    "novembro",
+    "dezembro"];
 
   /**
-   * Função que calcula o total de presenças (não faltas) para cada dia do mês selecionado.
-   * Ela percorre cada aluno e, para cada entrada de presenças (os dias estão armazenados
-   * com chaves no formato "dia-mês-ano"), se o mês corresponde ao mês selecionado e o aluno estava presente,
-   * incrementa a contagem para aquele dia.
-   *
-   * Observação: Removemos a comparação do ano para que a contagem funcione mesmo que os dados estejam registrados para um ano diferente.
+   * Calcula as presenças diárias para o mês selecionado.
+   * - Considera as chaves de presença no formato "dia-mês-ano" (por exemplo, "10-3-2025").
+   * - Converte o valor de presença usando Boolean() (caso seja string ou número).
+   * - Ignora a comparação do ano; se o mês extraído corresponder ao mês selecionado, conta.
    */
   const calculateDailyPresences = () => {
-    // Converte o selectedMonth para um número e ajusta para base 1 (0 => janeiro = 1)
-    const monthIndex = parseInt(selectedMonth, 10) + 1;
-    // Inicializa um array com zeros para cada dia do mês selecionado
-    const daysInMonth = new Date(new Date().getFullYear(), monthIndex, 0).getDate();
+    const monthIndex = parseInt(selectedMonth, 10) + 1; // 0 -> janeiro equivale a 1
+    // Para determinar os dias do mês, usamos o ano atual (não afeta a contagem se os registros tiverem outro ano)
+    const currentYear = new Date().getFullYear();
+    const daysInMonth = new Date(currentYear, monthIndex, 0).getDate();
     const dailyPresences = Array.from({ length: daysInMonth }, () => 0);
 
-    // Para cada aluno na turma...
     alunosDaTurma.forEach((aluno) => {
-      // Para cada chave no objeto 'presencas' do aluno (ex: "janeiro", "fevereiro", etc.)
-      Object.entries(aluno?.presencas || {}).forEach(([monthKey, days]) => {
-        // Para cada dia registrado nesse mês
-        Object.entries(days).forEach(([dayKey, isPresent]) => {
-          // dayKey esperado no formato "dia-mês-ano" (ex: "10-3-2025")
-          const [day, month, year] = dayKey.split('-').map(Number);
-          // Se o mês extraído for igual ao mês selecionado e o aluno estiver presente
+      const presencas = aluno?.presencas || {};
+      // Log para depuração: exibe as entradas de presenças do aluno
+      // console.log(`Presenças do aluno ${aluno.nome}:`, presencas);
+      Object.entries(presencas).forEach(([mesKey, dias]) => {
+        Object.entries(dias).forEach(([dayKey, isPresentValue]) => {
+          // Supondo que a chave esteja no formato "dia-mês-ano"
+          const parts = dayKey.split('-');
+          if (parts.length < 2) return; // formato inválido
+          const day = Number(parts[0]);
+          const month = Number(parts[1]);
+          // Use Boolean() para converter isPresentValue
+          const isPresent = Boolean(isPresentValue);
           if (month === monthIndex && isPresent) {
-            // Incrementa a contagem para o dia específico (ajustando o índice)
             dailyPresences[day - 1]++;
           }
         });
       });
     });
 
-    // Converte o array de presenças em um array de objetos { day, total } apenas com dias que tiveram pelo menos 1 presença
+    // Para depuração, log do resultado calculado:
+    // console.log('Daily presences:', dailyPresences);
+
     return dailyPresences
-      .map((total, day) => ({
-        day: day + 1,
-        total,
-      }))
-      .filter((dayObj) => dayObj.total > 0);
+      .map((total, day) => ({ day: day + 1, total }))
+      .filter((item) => item.total > 0);
   };
 
-  // Atualiza o estado do mês selecionado
+  // Evita recálculos desnecessários
+  const dailyData = useMemo(() => (selectedMonth ? calculateDailyPresences() : []), [selectedMonth, alunosDaTurma]);
+
   const handleChangeMonth = (event: SelectChangeEvent) => {
     setSelectedMonth(event.target.value);
   };
 
-  // Calcula o mês (base 1) a partir do valor selecionado
   const monthIndex = selectedMonth ? parseInt(selectedMonth, 10) + 1 : 0;
 
   return (
@@ -101,12 +105,7 @@ export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
           },
         }}
       >
-        <Typography
-          sx={{ color: 'black', mb: 2 }}
-          variant="h6"
-          gutterBottom
-          component="div"
-        >
+        <Typography variant="h6" sx={{ color: 'black', mb: 2 }}>
           Total de presenças da turma: {nomeDaTurma} no mês de:
         </Typography>
 
@@ -126,10 +125,10 @@ export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
 
         {selectedMonth && (
           <TableContainer component={Paper}>
-            <Table sx={{ minWidth: 650 }} size="small" aria-label="a dense table">
+            <Table sx={{ minWidth: 650 }} size="small" aria-label="Tabela de Presenças">
               <TableHead>
                 <TableRow>
-                  {calculateDailyPresences().map(({ day }) => (
+                  {dailyData.map(({ day }) => (
                     <TableCell key={day} align="center">
                       {`${String(day).padStart(2, '0')}/${String(monthIndex).padStart(2, '0')}`}
                     </TableCell>
@@ -138,7 +137,7 @@ export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
               </TableHead>
               <TableBody>
                 <TableRow>
-                  {calculateDailyPresences().map(({ day, total }) => (
+                  {dailyData.map(({ day, total }) => (
                     <TableCell key={day} align="center">
                       {total} alunos
                     </TableCell>
@@ -149,12 +148,7 @@ export const TurmaPresencaSemanal: React.FC<TurmaPresencaSemanalProps> = ({
           </TableContainer>
         )}
 
-        <Button
-          onClick={onClose}
-          variant="contained"
-          color="error"
-          sx={{ alignSelf: 'center', mt: '2px' }}
-        >
+        <Button onClick={onClose} variant="contained" color="error" sx={{ alignSelf: 'center', mt: 1 }}>
           Fechar
         </Button>
       </Box>
