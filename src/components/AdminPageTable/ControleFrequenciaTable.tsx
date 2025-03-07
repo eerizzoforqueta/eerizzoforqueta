@@ -32,90 +32,106 @@ export default function ControleFrequenciaTable({
   isOpen,
   onClose,
 }: ControleFrequenciaTableProps) {
- // Lista de meses em português (usaremos sempre em minúsculas para buscar nas chaves de presenças)
- const months = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho'];
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down('md'));
 
- /**
-  * Calcula as faltas acumuladas para cada mês.
-  * Para cada mês da lista, soma o número de ausências de todos os alunos.
-  * Considera que a propriedade aluno.presencas possui chaves com o nome do mês (em minúsculas)
-  * e que cada valor é um objeto cujas chaves estão no formato "dia-mês-ano".
-  */
- const calculateMonthlyAbsences = (): { month: string; total: number }[] => {
-   return months.map((month) => {
-     let totalAbsences = 0;
-     alunosDaTurma.forEach((aluno) => {
-       if (aluno.presencas && aluno.presencas[month]) {
-         // Contar as ausências (valores falsos) para o mês
-         const absences = Object.values(aluno.presencas[month]).filter(
-           (value) => !Boolean(value)
-         ).length;
-         totalAbsences += absences;
-       }
-     });
-     return { month, total: totalAbsences };
-   });
- };
+  // Lista de meses (em minúsculas para comparar com as chaves de presenças)
+  const months = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho'];
 
- // Memorizamos os dados mensais para evitar recálculos a cada renderização
- const monthlyData = useMemo(() => calculateMonthlyAbsences(), [alunosDaTurma]);
+  // Filtra os alunos válidos (evitando valores nulos)
+  const validAlunos = useMemo(() => alunosDaTurma.filter(Boolean), [alunosDaTurma]);
 
- return (
-   <Modal open={isOpen} onClose={onClose}>
-     <Box
-       sx={{
-         position: 'absolute',
-         top: '50%',
-         left: '50%',
-         transform: 'translate(-50%, -50%)',
-         width: 'fit-content',
-         bgcolor: 'background.paper',
-         boxShadow: 24,
-         p: 4,
-         overflowY: 'auto',
-         maxHeight: '80vh',
-         borderRadius: 2,
-         '& .MuiTableCell-root': {
-           padding: '8px',
-           borderRight: '1px solid rgba(224, 224, 224, 1)',
-         },
-         '& .MuiTableCell-head': {
-           backgroundColor: '#f5f5f5',
-           fontWeight: 'bold',
-         },
-       }}
-     >
-       <Typography variant="h6" sx={{ color: 'black', mb: 2 }}>
-         Total de faltas da turma: {nomeDaTurma}
-       </Typography>
-       <TableContainer component={Paper}>
-         <Table sx={{ minWidth: 650 }} size="small" aria-label="Tabela de Faltas">
-           <TableHead>
-             <TableRow>
-               {monthlyData.map(({ month }) => (
-                 <TableCell key={month} align="center">
-                   {month.charAt(0).toUpperCase() + month.slice(1)}
-                 </TableCell>
-               ))}
-             </TableRow>
-           </TableHead>
-           <TableBody>
-             <TableRow>
-               {monthlyData.map(({ month, total }) => (
-                 <TableCell key={month} align="center">
-                   {total} faltas
-                 </TableCell>
-               ))}
-             </TableRow>
-           </TableBody>
-         </Table>
-       </TableContainer>
-       <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-         <Button onClick={onClose} variant="contained" color="error">
-           Fechar
-         </Button>
-       </Box>
-     </Box>
-   </Modal>
- );
+  /**
+   * Retorna o número total de faltas para um aluno em um determinado mês.
+   * @param aluno - Dados do aluno.
+   * @param month - Nome do mês em minúsculas, ex: "janeiro".
+   */
+  const countAbsencesForStudent = (aluno: Aluno, month: string): number => {
+    if (!aluno.presencas || !aluno.presencas[month]) return 0;
+    const days = aluno.presencas[month];
+    return Object.values(days).filter((value) => !Boolean(value)).length;
+  };
+
+  // Cria os dados para a tabela: para cada aluno, cria um objeto com a propriedade "nome" e as chaves para cada mês.
+  const tableData = useMemo(() => {
+    return validAlunos.map((aluno) => {
+      // Declara um objeto com assinatura de índice para permitir outras propriedades
+      const row: { nome: string; [key: string]: number | string } = { nome: aluno.nome };
+      months.forEach((month) => {
+        row[month] = countAbsencesForStudent(aluno, month);
+      });
+      return row;
+    });
+  }, [validAlunos]);
+
+  return (
+    <Modal open={isOpen} onClose={onClose}>
+      <Box
+        sx={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: fullScreen ? '90%' : '80%',
+          bgcolor: 'background.paper',
+          boxShadow: 24,
+          p: 4,
+          overflowY: 'auto',
+          maxHeight: '90vh',
+          borderRadius: 2,
+          '& .MuiTableCell-root': {
+            padding: '8px',
+            borderRight: '1px solid rgba(224, 224, 224, 1)',
+          },
+          '& .MuiTableCell-head': {
+            backgroundColor: '#f5f5f5',
+            fontWeight: 'bold',
+          },
+        }}
+      >
+        <Typography variant="h6" gutterBottom sx={{ color: 'black', mb: 2 }}>
+          Faltas mensais na turma: {nomeDaTurma}
+        </Typography>
+        <TableContainer component={Paper} sx={{ mb: 2 }}>
+          <Table stickyHeader aria-label="Tabela de Faltas Mensais por Aluno">
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ fontWeight: 'bold' }}>Aluno</TableCell>
+                {months.map((month) => (
+                  <TableCell key={month} align="center" sx={{ fontWeight: 'bold' }}>
+                    {month.charAt(0).toUpperCase() + month.slice(1)}
+                  </TableCell>
+                ))}
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {tableData.length > 0 ? (
+                tableData.map((row, index) => (
+                  <TableRow key={index} sx={{ bgcolor: index % 2 === 0 ? 'background.default' : 'grey.100' }}>
+                    <TableCell>{row.nome}</TableCell>
+                    {months.map((month) => (
+                      <TableCell key={month} align="center">
+                        {row[month]} faltas
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={months.length + 1} align="center">
+                    Nenhum aluno encontrado nesta turma.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </TableContainer>
+        <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+          <Button onClick={onClose} variant="contained" color="error">
+            Fechar
+          </Button>
+        </Box>
+      </Box>
+    </Modal>
+  );
 };
