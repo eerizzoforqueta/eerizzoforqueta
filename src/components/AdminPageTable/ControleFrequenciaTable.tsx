@@ -101,8 +101,8 @@ export default function ControleFrequenciaTable({
         <FormControl component="fieldset" sx={{ mb: 3 }}>
           <Typography variant="subtitle1" sx={{ mb: 1 }}>Selecione o Semestre:</Typography>
           <RadioGroup row value={selectedSemester} onChange={handleSemesterChange}>
-            <FormControlLabel value="primeiro" control={<Radio />} label="1º Semestre" />
-            <FormControlLabel value="segundo" control={<Radio />} label="2º Semestre" />
+            <FormControlLabel sx={{color:"black"}} value="primeiro" control={<Radio />} label="1º Semestre" />
+            <FormControlLabel sx={{color:"black"}} value="segundo" control={<Radio />} label="2º Semestre" />
           </RadioGroup>
         </FormControl>
 
