@@ -8,34 +8,36 @@ export default async function updateStudent(
 ) {
   if (req.method === 'PUT') {
     try {
-      // Tenta obter o identificador enviado, seja por "alunoId" ou "id"
-      const alunoIdPayload = req.body.alunoId || req.body.id
-      const { novosDados } = req.body
+      // Extrai o identificador único e os novos dados do corpo da requisição.
+      // O identificador deve ser enviado com a chave "identificadorUnico"
+      const { identificadorUnico, novosDados } = req.body
 
-      if (!alunoIdPayload) {
-        return res.status(400).json({ error: 'AlunoId não fornecido.' })
+      if (!identificadorUnico) {
+        return res.status(400).json({ error: 'identificadorUnico não fornecido.' })
       }
 
-      // Referência à seção de modalidades no banco de dados
+      // Referência à raiz das modalidades no Firebase Realtime Database
       const modalidadesRef = admin.database().ref('modalidades')
       const modalidadesSnapshot = await modalidadesRef.once('value')
       const modalidades = modalidadesSnapshot.val()
 
       let alunoEncontrado = false
 
-      // Itera por todas as modalidades e suas turmas
+      // Itera por cada modalidade e suas turmas
       for (const modalidadeNome in modalidades) {
         const modalidade = modalidades[modalidadeNome]
         if (!modalidade.turmas) continue
+
         for (const turmaKey in modalidade.turmas) {
           const turma = modalidade.turmas[turmaKey]
           if (!turma.alunos) continue
+
           for (const alunoKey in turma.alunos) {
             const aluno = turma.alunos[alunoKey]
-            // Verifica se o aluno possui "alunoId" ou "id" que corresponda ao payload
+            // Verifica se o campo informacoesAdicionais existe e se o IdentificadorUnico bate com o enviado no payload
             if (
-              (aluno.alunoId && String(aluno.alunoId) === String(alunoIdPayload)) ||
-              (aluno.id && String(aluno.id) === String(alunoIdPayload))
+              aluno.informacoesAdicionais &&
+              aluno.informacoesAdicionais.IdentificadorUnico === identificadorUnico
             ) {
               // Atualiza os dados do aluno com os novos dados enviados
               await admin
@@ -52,10 +54,12 @@ export default async function updateStudent(
         return res.status(404).json({ error: 'Aluno não encontrado.' })
       }
 
-      return res.status(200).json({ message: 'Aluno atualizado em todas as turmas com sucesso.' })
+      return res.status(200).json({
+        message: 'Aluno atualizado em todas as turmas com sucesso.',
+      })
     } catch (error) {
-      console.error('Erro ao atualizar aluno em todas as turmas', error)
-      return res.status(500).json({ error: 'Erro ao atualizar aluno em todas as turmas.' })
+      console.error('Erro ao atualizar aluno:', error)
+      return res.status(500).json({ error: 'Erro ao atualizar aluno.' })
     }
   } else {
     res.setHeader('Allow', 'PUT')
