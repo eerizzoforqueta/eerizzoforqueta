@@ -91,33 +91,24 @@ export default function StudentUpdatePersonalInformation() {
     fetchModalidades().catch(console.error);
   }, [fetchModalidades]);
 
-  useEffect(() => {
-    const alunoIdMap = new Map(); // Usar Map para rastrear alunos únicos pelo ID
-
-    modalidades.forEach((modalidade) => {
-      modalidade.turmas.forEach((turma) => {
-        (Array.isArray(turma.alunos)
-          ? turma.alunos.filter(Boolean)
-          : []
-        ).forEach((aluno) => {
-          // Verifica se o aluno já foi adicionado, baseando-se no ID
-          // A verificação aluno != null foi substituída por .filter(Boolean) acima para filtrar valores null ou undefined
-          if (!alunoIdMap.has(aluno.nome)) {
-            alunoIdMap.set(aluno.nome, {
-              ...aluno,
-              nomeDaTurma: turma.nome_da_turma, // Você pode ajustar essa parte conforme a necessidade
-              modalidade: modalidade.nome,
-            });
-          }
+ useEffect(() => {
+  // Cria um array com todas as instâncias dos alunos, sem filtrar duplicatas
+  const alunosTemp: IIAlunoUpdate[] = [];
+  modalidades.forEach((modalidade) => {
+    modalidade.turmas.forEach((turma) => {
+      const alunos = Array.isArray(turma.alunos) ? turma.alunos.filter(Boolean) : [];
+      alunos.forEach((aluno) => {
+        alunosTemp.push({
+          ...aluno,
+          nomeDaTurma: turma.nome_da_turma,
+          modalidade: modalidade.nome,
         });
       });
     });
+  });
+  setAlunosOptions(alunosTemp);
+}, [modalidades]);
 
-    // Convertendo o Map de volta para um array de alunos
-    const alunosUnicos = Array.from(alunoIdMap.values());
-
-    setAlunosOptions(alunosUnicos);
-  }, [modalidades]);
 
   const onSubmit: SubmitHandler<IIAlunoUpdate> = async (data) => {
     console.log("Dados do formulário antes do upload:", data);
@@ -440,28 +431,28 @@ export default function StudentUpdatePersonalInformation() {
             <Box sx={{ display: "table", width: "100%" }}>
               <HeaderForm titulo={"Atualização de dados dos Atletas"} />
               <Autocomplete
-                options={alunosOptions}
-                getOptionLabel={(option) => option.nome || ""}
-                onChange={handleAlunoChange}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Nome do Aluno"
-                    margin="normal"
-                    required
-                    fullWidth
-                  />
-                )}
-                renderOption={(props, option) => {
-                  // Use uma chave única concatenando o ID do aluno com o nome. Se o ID estiver faltando, você pode usar um fallback como um UUID ou índice.
-                  const key = uuidv4() + option.alunoId;
-                  return (
-                    <li {...props} key={key}>
-                      {option.nome}
-                    </li>
-                  );
-                }}
-              />
+  options={alunosOptions}
+  getOptionLabel={(option) => option.nome || ""}
+  onChange={handleAlunoChange}
+  renderInput={(params) => (
+    <TextField
+      {...params}
+      label="Nome do Aluno"
+      margin="normal"
+      required
+      fullWidth
+    />
+  )}
+  renderOption={(props, option) => {
+    // Cria uma chave única combinando o IdentificadorUnico com a turma (ou outro campo)
+    const key = `${option.informacoesAdicionais?.IdentificadorUnico}-${option.nomeDaTurma}`;
+    return (
+      <li {...props} key={key}>
+        {option.nome} – {option.nomeDaTurma} ({option.modalidade})
+      </li>
+    );
+  }}
+/>
             </Box>
             {/* ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ */}
 
