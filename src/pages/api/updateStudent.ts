@@ -27,7 +27,7 @@ export default async function updateStudentEverywhere(
           for (const alunoKey in turma.alunos) {
             const aluno = turma.alunos[alunoKey]
             // Checa se o nome do aluno corresponde e atualiza seus dados
-            if (aluno.nome === nomeAluno) {
+            if (aluno.id === alunoId) {
               await admin
                 .database()
                 .ref(
