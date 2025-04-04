@@ -171,43 +171,40 @@ const DataProvider: React.FC<ChildrenProps> = ({ children }) => {
   // -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   // Atualizar informações do estudante em todas as turmas em que ele está inscrito
   const updateDataInApi = async (data: IIAlunoUpdate) => {
-    
-    const payload = {
-      nomeAluno: data.nome, // Usando o nome do aluno como chave para a atualização
-      novosDados: {
-        // Agrupando os novos dados em um objeto
-        anoNascimento: data.anoNascimento,
-        telefoneComWhatsapp: data.telefoneComWhatsapp,
-        nome: data.nome, 
-        informacoesAdicionais: data.informacoesAdicionais,
-        foto: data.foto,
-      },
-    }
-
-    try {
-     
-      const response = await fetch('/api/updateStudent', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      } else {
-        const responseData = await response.json()
-       
-      }
-    } catch (error) {
-      console.error(
-        'Erro ao atualizar informações do aluno em todas as turmas:',
-        error,
-      )
-      
-    }
+  // Garante que o identificador único esteja presente
+  if (!data.informacoesAdicionais.IdentificadorUnico) {
+    console.error("IdentificadorUnico não encontrado no aluno selecionado.");
+    return;
   }
+
+  const payload = {
+    identificadorUnico: data.informacoesAdicionais.IdentificadorUnico, // chave usada na API
+    novosDados: {
+      anoNascimento: data.anoNascimento,
+      telefoneComWhatsapp: data.telefoneComWhatsapp,
+      nome: data.nome,
+      informacoesAdicionais: data.informacoesAdicionais,
+      foto: data.foto,
+    },
+  };
+
+  try {
+    const response = await fetch('/api/updateStudent', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+  } catch (error) {
+    console.error('Erro ao atualizar informações do aluno em todas as turmas:', error);
+  }
+};
+
 
   // -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
   // atualizar presenças do estudante
