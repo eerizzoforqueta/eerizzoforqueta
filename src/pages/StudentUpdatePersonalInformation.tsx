@@ -211,6 +211,7 @@ export default function StudentUpdatePersonalInformation() {
         "telefoneComWhatsapp",
         value.telefoneComWhatsapp ? value.telefoneComWhatsapp.toString() : "-"
       );
+       setValue("informacoesAdicionais.IdentificadorUnico", value.informacoesAdicionais.IdentificadorUnico);
       if (!value.informacoesAdicionais.endereco) {
         value.informacoesAdicionais.endereco = {
           ruaAvenida: "",
@@ -466,6 +467,7 @@ export default function StudentUpdatePersonalInformation() {
 
             {/* ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ */}
             <List sx={ListStyle}>
+              <input type="hidden" {...register("informacoesAdicionais.IdentificadorUnico")} />
               <Typography sx={TituloSecaoStyle}>
                 Seção 1 - Identificação do Aluno
               </Typography>
