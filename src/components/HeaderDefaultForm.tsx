@@ -30,7 +30,7 @@ export const HeaderForm=({titulo}:{titulo:string})=>{
             />
           </Avatar>
           <Typography sx={TituloDaPagina}>{titulo}</Typography>
-          <Typography sx={SubtituloDaPagina}>E.E. Rizzo Forqueta</Typography>
+          <Typography sx={SubtituloDaPagina}>Escola Esportiva Rizzo Sports</Typography>
         </Box>
     )
 
