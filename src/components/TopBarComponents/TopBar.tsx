@@ -118,7 +118,7 @@ export default function ResponsiveAppBar() {
                 }}
               >
                 <Image
-                  src="https://firebasestorage.googleapis.com/v0/b/imagens-9116b.appspot.com/o/logoescolinha-removebg-preview(1).png?alt=media&token=c33b14a0-c768-45a1-926f-94b85770f27b"
+                  src="https://firebasestorage.googleapis.com/v0/b/mauriciodallonder-64688.appspot.com/o/logoNovoRizzo.jpeg?alt=media&token=72c25b2d-fe50-4fac-84d4-c072d2e6ed5f"
                   alt=""
                   layout="fill" // Isso fará a imagem preencher o Avatar
                   objectFit="contain" // Isso garante que a imagem inteira seja visível
