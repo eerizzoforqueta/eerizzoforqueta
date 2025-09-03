@@ -11,7 +11,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { CorrigirDadosDefinitivos } from '@/utils/CorrigirDadosTurmasEmComponetes';
 
 export default function ArquivarAlunos() {
-    const { deleteStudentFromApi, modalidades, fetchModalidades } = useContext(DataContext);
+    const { deleteStudentFromApi, modalidades, fetchModalidades,archiveAndDeleteStudent } = useContext(DataContext);
     const { handleSubmit, control } = useForm();
     const [selectedAluno, setSelectedAluno] = useState<ArchiveAluno | null>(null);
     const [alunosOptions, setAlunosOptions] = useState<ArchiveAluno[]>([]);
@@ -97,12 +97,7 @@ export default function ArquivarAlunos() {
             const data = response.data;
             if (data.status === 'Success') {
                 try {
-                    // Remove o aluno do banco de dados via API do Next.js
-                    await deleteStudentFromApi({
-                        alunoId: selectedAluno.IdentificadorUnico as string,
-                        modalidade: selectedAluno.modalidade,
-                        nomeDaTurma: selectedAluno.nomeDaTurma,
-                    });
+                    await archiveAndDeleteStudent(selectedAluno) 
                 } catch (error) {
                     console.error('Erro ao remover aluno:', error);
                     console.log(selectedAluno.IdentificadorUnico)

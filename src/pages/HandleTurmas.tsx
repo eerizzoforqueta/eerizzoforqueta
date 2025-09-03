@@ -25,7 +25,7 @@ import { Modalidade, Turma } from '@/interface/interfaces';
 import { useData } from '@/context/context';
 import { BoxStyleCadastro } from '@/utils/Styles';
 import Layout from '@/components/TopBarComponents/Layout';
-
+import MergeTurmasForm from "@/components/MergeTurmasForm";
 interface TabPanelProps {
   children?: React.ReactNode;
   value: number;
@@ -238,6 +238,7 @@ export default function ManageTurmas() {
               <Tab label="Criar Turma" />
               <Tab label="Atualizar Turma" />
               <Tab label="Excluir Turma" />
+              <Tab label="Mesclar Turmas" />
             </Tabs>
           </AppBar>
           <TabPanel value={tabIndex} index={0}>
@@ -373,6 +374,9 @@ export default function ManageTurmas() {
                 {loading ? 'Aguarde, deletando turma' : 'Deletar Turma'}
               </Button>
             )}
+          </TabPanel>
+          <TabPanel value={tabIndex} index={3}>
+             <MergeTurmasForm />;
           </TabPanel>
           <Snackbar open={!!successMessage} autoHideDuration={6000} onClose={() => setSuccessMessage('')}>
             <Alert onClose={() => setSuccessMessage('')} severity="success" sx={{ width: '100%' }}>

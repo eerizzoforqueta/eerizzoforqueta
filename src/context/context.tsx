@@ -12,7 +12,8 @@ import {
   DeleteStudants,
   TemporaryMoveStudentsPayload,
   Turma,
-  IIAvisos
+  IIAvisos,
+  ArchiveAluno
 } from '../interface/interfaces'
 import axios from 'axios'
 import React, {
@@ -38,6 +39,7 @@ interface DataContextType {
   copyStudentTemp: (payload: TemporaryMoveStudentsPayload) => Promise<void>
   updateUniformeInApi: (data: { modalidade: string; nomeDaTurma: string; alunoNome: string; hasUniforme: boolean }) => Promise<void>;
   deleteStudentFromApi:(payload: DeleteStudants) => Promise<void>
+  archiveAndDeleteStudent: (aluno: ArchiveAluno) => Promise<void>
   avisoStudent: (payload: IIAvisos, method: 'POST' | 'PUT' | 'DELETE') => Promise<void>;
 }
 
@@ -71,6 +73,7 @@ const DataContext = createContext<DataContextType>({
   avisoStudent: async (payload: IIAvisos) => {
     console.warn('moveStudentInApi not implemented', payload)
   },
+  archiveAndDeleteStudent: async () => {}
 
 })
 
@@ -316,30 +319,40 @@ const avisoStudent = async (payload: IIAvisos, method: 'POST' | 'PUT' | 'DELETE'
 
 
 
-//----------------------------------------------------------------------------
-// Função para excluir um estudante
-// No contexto (DataContext)
-
-async function deleteStudentFromApi(data: { alunoId: string; modalidade: string; nomeDaTurma: string; }) {
-  if (!data.alunoId || !data.modalidade || !data.nomeDaTurma) {
-    throw new Error('Dados incompletos para excluir o aluno.');
+// ------------------------------------------------------------------
+  // Deletar aluno (APENAS deletar). Importante: alunoId deve ser o IdentificadorUnico!
+  async function deleteStudentFromApi(data: { alunoId: string; modalidade: string; nomeDaTurma: string }) {
+    if (!data.alunoId || !data.modalidade || !data.nomeDaTurma) {
+      throw new Error('Dados incompletos para excluir o aluno.')
+    }
+    // ATENÇÃO: seu arquivo da API se chama DeleteStudents.ts -> rota: /api/DeleteStudents
+    // Se preferir /api/deleteStudent, renomeie o arquivo para pages/api/deleteStudent.ts
+    const response = await fetch('/api/DeleteStudents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.error || 'Erro ao excluir o aluno.')
+    }
+    return response.json()
   }
 
-  const response = await fetch('/api/deleteStudent', {
-    method: 'POST', // Alterado para POST
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(data),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.error || 'Erro ao excluir o aluno.');
+  // ------------------------------------------------------------------
+  // Arquivar no Google Sheets e DEPOIS deletar (endpoint orquestrador)
+  const archiveAndDeleteStudent = async (aluno: ArchiveAluno) => {
+    const response = await fetch('/api/ArquivarAlunos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(aluno),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok || data?.status !== 'Success') {
+      throw new Error(data?.message || 'Falha ao arquivar/deletar o aluno.')
+    }
+    // sucesso: a própria API já remove do Realtime Database após gravar na planilha
   }
-
-  return response.json();
-}
 
 
 
@@ -394,7 +407,8 @@ async function deleteStudentFromApi(data: { alunoId: string; modalidade: string;
         deleteStudentFromApi, 
         moveStudentTemp,
         copyStudentTemp,
-        avisoStudent 
+        avisoStudent,
+        archiveAndDeleteStudent, 
       }}
     >
       {children}
