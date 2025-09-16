@@ -1,269 +1,339 @@
-import * as React from "react";
+// src/pages/alerta-faltas-mensal.tsx
+'use client';
+
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-    DataGrid,
-    GridColDef,
-    GridCsvExportOptions,
-    GridCsvGetRowsToExportParams,
-    GridRowId,
-    GridRowsProp,
-    GridToolbar,
-    useGridApiContext,
-    useGridSelector,
-    gridPageSelector,
-    gridPageCountSelector,
-    gridExpandedSortedRowIdsSelector,
-    GridCellParams
-} from "@mui/x-data-grid";
-import Pagination from "@mui/material/Pagination";
-import PaginationItem from "@mui/material/PaginationItem";
-import { useData } from "@/context/context";
-import { useEffect, useState } from "react";
-import { AlunoComTurma } from "@/interface/interfaces";
-import { v4 as uuidv4 } from "uuid";
-import { Avatar, Button, Container, Dialog, DialogContent, DialogTitle, IconButton, Box, Snackbar, Alert } from "@mui/material";
-import DownloadingIcon from "@mui/icons-material/Downloading";
-import CloseIcon from '@mui/icons-material/Close';
-import ResponsiveAppBar from "@/components/TopBarComponents/TopBar";
-import { StyledDataGrid } from "@/utils/Styles";
-import { useCopyToClipboard } from "@/hooks/CopyToClipboardHook";
+  Box,
+  Chip,
+  Container,
+  Paper,
+  Select,
+  MenuItem,
+  SelectChangeEvent,
+  InputLabel,
+  FormControl,
+  Typography,
+  Table,
+  TableHead,
+  TableRow,
+  TableCell,
+  TableBody,
+  TextField,
+  IconButton,
+  Stack,
+  Divider,
+} from '@mui/material';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 
-const normalizeText = (text: any): string => {
-    return text ? String(text).trim() : "";
-};
+import Layout from '@/components/TopBarComponents/Layout';
+import { useData } from '@/context/context';
+import { Aluno, Modalidade, Turma } from '@/interface/interfaces';
 
-function CustomPagination() {
-    const apiRef = useGridApiContext();
-    const page = useGridSelector(apiRef, gridPageSelector);
-    const pageCount = useGridSelector(apiRef, gridPageCountSelector);
+const MESES_PT = [
+  'janeiro',
+  'fevereiro',
+  'março',
+  'abril',
+  'maio',
+  'junho',
+  'julho',
+  'agosto',
+  'setembro',
+  'outubro',
+  'novembro',
+  'dezembro',
+];
 
-    const getFilteredRows = ({ apiRef }: GridCsvGetRowsToExportParams) =>
-        gridExpandedSortedRowIdsSelector(apiRef);
-
-    const handleExport = (options: GridCsvExportOptions) =>
-        apiRef.current.exportDataAsCsv(options);
-
-    return (
-        <>
-            <Pagination
-                color="primary"
-                variant="outlined"
-                shape="rounded"
-                page={page + 1}
-                count={pageCount}
-                 // @ts-expect-error
-                renderItem={(props2) => <PaginationItem {...props2} disableRipple />}
-                onChange={(event: React.ChangeEvent<unknown>, value: number) =>
-                    apiRef.current.setPage(value - 1)
-                }
-            />
-            <Button
-                onClick={() => handleExport({ getRowsToExport: getFilteredRows })}
-                sx={{ gap: "2px", display: "flex", alignItems: "center" }}
-                variant="contained"
-                color="secondary"
-            >
-                <DownloadingIcon />
-                Exportar colunas selecionadas
-            </Button>
-        </>
-    );
+// ====== Helpers ======
+function monthNameNow(): string {
+  const now = new Date();
+  return MESES_PT[now.getMonth()];
 }
 
-const PAGE_SIZE = 30;
+function normalizeAlunos(alunos: unknown): Aluno[] {
+  if (!alunos) return [];
+  const arr = Array.isArray(alunos) ? alunos : Object.values(alunos as Record<string, unknown>);
+  return (arr as Aluno[]).filter(Boolean);
+}
 
-export default function StudantTableGeral() {
-    const { fetchModalidades } = useData();
-    const [alunosComTurma, setAlunosComTurma] = useState<AlunoComTurma[]>([]);
-    const [modifiedRows, setModifiedRows] = useState<Record<GridRowId, AlunoComTurma>>({});
-    const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
-    const [copiedText, copyToClipboard] = useCopyToClipboard();
-    const [openSnackbar, setOpenSnackbar] = useState(false);
+function ordenarPorDia(a: string, b: string) {
+  const da = parseInt(a.split('-')[0], 10);
+  const db = parseInt(b.split('-')[0], 10);
+  return (isNaN(da) ? 0 : da) - (isNaN(db) ? 0 : db);
+}
 
-    useEffect(() => {
-        fetchModalidades().then((modalidadesFetched) => {
-            const modalidadesValidas = modalidadesFetched.filter(
-                (modalidade) => !["temporarios", "arquivados", "excluidos"].includes(modalidade.nome.toLowerCase())
-            );
+function parseDateKey(dayKey: string): Date | null {
+  // esperado: "D-M-YYYY" (ex.: "12-4-2025")
+  const [d, m, y] = dayKey.split('-').map((n) => parseInt(n, 10));
+  if (!d || !m || !y) return null;
+  const dt = new Date(y, m - 1, d);
+  return isNaN(dt.getTime()) ? null : dt;
+}
 
-            const alunosComTurmaTemp: AlunoComTurma[] = modalidadesValidas.flatMap((modalidade) =>
-                modalidade.turmas.flatMap((turma) => {
-                    const alunosArray = Array.isArray(turma.alunos) ? turma.alunos : [];
-                    return alunosArray.filter(Boolean).map((aluno): AlunoComTurma => ({
-                        aluno: {
-                            ...aluno,
-                            informacoesAdicionais: {
-                                ...aluno.informacoesAdicionais,
-                                IdentificadorUnico: aluno.informacoesAdicionais?.IdentificadorUnico ?? uuidv4(),
-                            },
-                        },
-                        nomeDaTurma: turma.nome_da_turma,
-                        categoria: turma.categoria,
-                        modalidade: turma.modalidade,
-                        uniforme: aluno.informacoesAdicionais?.hasUniforme ?? false,
-                    }));
-                })
-            );
+type TurmaContexto = {
+  modalidade: string;
+  turma: Turma;
+  alunos: Aluno[];
+};
 
-            setAlunosComTurma(alunosComTurmaTemp);
+// ====== Página ======
+export default function AlertaFaltasMensalGlobal() {
+  const { fetchModalidades } = useData();
+
+  // UI: mês + limite
+  const [mesSel, setMesSel] = useState<string>(monthNameNow());
+  const [limiteFaltas, setLimiteFaltas] = useState<number>(3);
+
+  // dados
+  const [modalidades, setModalidades] = useState<Modalidade[]>([]);
+
+  // Regras fixas (para simplificar a vida do prof):
+  const IGNORAR_FUTURO = true;
+  const SOMENTE_DIAS_REGISTRADOS = true;
+
+  // Carrega todas as modalidades (exclui "arquivados", "excluidos" e "temporarios")
+  useEffect(() => {
+    fetchModalidades()
+      .then((mods) => {
+        const valid = mods.filter(
+          (m) =>
+            m.nome.toLowerCase() !== 'arquivados' &&
+            m.nome.toLowerCase() !== 'excluidos' &&
+            m.nome.toLowerCase() !== 'temporarios'
+        );
+        setModalidades(valid);
+      })
+      .catch(console.error);
+  }, [fetchModalidades]);
+
+  // Flatten: todas as turmas com seu contexto (modalidade + turma + alunos normalizados)
+  const todasTurmas: TurmaContexto[] = useMemo(() => {
+    const itens: TurmaContexto[] = [];
+    modalidades.forEach((mod) => {
+      const turmas = mod.turmas
+        ? (Array.isArray(mod.turmas) ? mod.turmas : (Object.values(mod.turmas) as Turma[]))
+        : [];
+      turmas.forEach((turma) => {
+        itens.push({
+          modalidade: mod.nome,
+          turma,
+          alunos: normalizeAlunos(turma.alunos),
         });
-    }, [fetchModalidades]);
+      });
+    });
+    return itens;
+  }, [modalidades]);
 
-    const handleClose = () => {
-        setSelectedPhoto(null);
-    };
+  // Para cada turma, calcula os "dias válidos" no mês selecionado:
+  // - Ignora dias futuros
+  // - Se SOMENTE_DIAS_REGISTRADOS: só conta dias em que pelo menos 1 aluno marcou presença (true)
+  const diasValidosPorTurma = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-    const handlePhotoClick = (photoUrl: string) => {
-        setSelectedPhoto(photoUrl);
-    };
+    const map = new Map<string, string[]>(); // chave = uuidTurma (ou nome) => dias válidos
 
-    const handleCellClick = async (params: GridCellParams) => {
-        const cellContent = params.value ? String(params.value) : '';
-        const success = await copyToClipboard(cellContent);
-        if (success) {
-            console.log(`Text "${cellContent}" copied to clipboard successfully.`);
-            setOpenSnackbar(true);
-        } else {
-            console.error('Failed to copy text to clipboard.');
-        }
-    };
+    todasTurmas.forEach(({ turma, alunos }) => {
+      const setDias = new Set<string>();
+      // junta todos os dayKeys do mês nos alunos da turma
+      alunos.forEach((aluno) => {
+        const mes = aluno.presencas?.[mesSel] ?? {};
+        Object.keys(mes).forEach((k) => setDias.add(k));
+      });
 
-    const handleSnackbarClose = (event?: React.SyntheticEvent | Event, reason?: string) => {
-        if (reason === 'clickaway') {
-            return;
-        }
-        setOpenSnackbar(false);
-    };
+      let keys = Array.from(setDias);
 
-    const [paginationModel, setPaginationModel] = useState({
-        pageSize: PAGE_SIZE,
-        page: 0,
+      if (IGNORAR_FUTURO) {
+        keys = keys.filter((k) => {
+          const dt = parseDateKey(k);
+          return dt !== null && dt.getTime() <= today.getTime();
+        });
+      }
+
+      if (SOMENTE_DIAS_REGISTRADOS) {
+        keys = keys.filter((k) =>
+          alunos.some((a) => a.presencas?.[mesSel]?.[k] === true)
+        );
+      }
+
+      keys.sort(ordenarPorDia);
+      const turmaId = turma.uuidTurma ?? turma.nome_da_turma; // fallback seguro
+      map.set(turmaId, keys);
     });
 
-    const rows: GridRowsProp = alunosComTurma.map(
-        ({ aluno, nomeDaTurma, categoria, modalidade }) => {
-            return {
-                id: aluno.informacoesAdicionais?.IdentificadorUnico ?? uuidv4(),
-                foto: aluno.foto,
-                nome: aluno.nome,
-                anoNascimento: aluno.anoNascimento,
-                dataMatricula: aluno.dataMatricula == undefined ? "Não informado" : normalizeText(String(aluno.dataMatricula)),
-                rg: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.rg) : "",
-                uniforme: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.uniforme) : "",
-                telefoneComWhatsapp: normalizeText(String(aluno.telefoneComWhatsapp)),
-                turma: nomeDaTurma,
-                irmaos: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.irmaos) : "",
-                nomefuncionarioJBS: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.nomefuncionarioJBS) : "",
-                nomefuncionariomarcopolo: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.nomefuncionariomarcopolo) : "",
-                endereco: aluno.informacoesAdicionais && aluno.informacoesAdicionais.endereco ? normalizeText(aluno.informacoesAdicionais.endereco.ruaAvenida) : "",
-                pagadorMensalidadesNome: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.pagadorMensalidades?.nomeCompleto) : "",
-                pagadorMensalidadesCpf: aluno.informacoesAdicionais ? normalizeText(String(aluno.informacoesAdicionais.pagadorMensalidades?.cpf)) : "",
-                pagadorMensalidadesEmail: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.pagadorMensalidades?.email) : "",
-                pagadorMensalidadesCelular: aluno.informacoesAdicionais ? normalizeText(String(aluno.informacoesAdicionais.pagadorMensalidades?.celularWhatsapp)) : "",
-            };
+    return map;
+  }, [todasTurmas, mesSel]);
+
+  // Computa faltas/presenças por aluno usando os dias válidos da turma dele.
+  type Linha = {
+    alunoNome: string;
+    modalidade: string;
+    turmaNome: string;
+    faltas: number;
+    presencas: number;
+    freq: string;
+    telefone?: string | number;
+  };
+
+  const linhasComMuitasFaltas: Linha[] = useMemo(() => {
+    const out: Linha[] = [];
+
+    todasTurmas.forEach(({ modalidade, turma, alunos }) => {
+      const turmaId = turma.uuidTurma ?? turma.nome_da_turma;
+      const diasValidos = diasValidosPorTurma.get(turmaId) ?? [];
+
+      if (diasValidos.length === 0) return;
+
+      alunos.forEach((aluno) => {
+        const mes = aluno.presencas?.[mesSel] ?? {};
+        let pres = 0;
+        let falt = 0;
+        diasValidos.forEach((dia) => {
+          const v = mes[dia];
+          if (v === true) pres++;
+          else if (v === false) falt++; // undefined não conta
+        });
+        const total = pres + falt;
+        if (falt >= limiteFaltas) {
+          const freq = total > 0 ? ((pres / total) * 100).toFixed(1) : '0.0';
+          out.push({
+            alunoNome: aluno.nome,
+            modalidade,
+            turmaNome: turma.nome_da_turma,
+            faltas: falt,
+            presencas: pres,
+            freq,
+            telefone: aluno.telefoneComWhatsapp,
+          });
         }
+      });
+    });
+
+    // Ordena: mais faltas primeiro, depois por nome
+    out.sort((a, b) => (b.faltas - a.faltas) || a.alunoNome.localeCompare(b.alunoNome));
+    return out;
+  }, [todasTurmas, diasValidosPorTurma, mesSel, limiteFaltas]);
+
+  function waLink(raw: string | number | undefined) {
+    if (!raw) return null;
+    const digits = String(raw).replace(/\D/g, '');
+    if (!digits) return null;
+    const msg = encodeURIComponent(
+      `Olá! Notamos ${limiteFaltas}+ faltas neste mês. Está tudo bem? Contamos com a presença nos próximos treinos.`
     );
+    return `https://wa.me/55${digits}?text=${msg}`;
+  }
 
-    const mergedRows = rows.map(row => ({
-        ...row,
-        ...(modifiedRows[row.id] ? { uniforme: modifiedRows[row.id].uniforme } : {})
-    }));
+  return (
+    <Layout>
+      <Container maxWidth="lg" sx={{ py: 3 }}>
+        <Typography variant="h5" sx={{ fontWeight: 'bold', mb: 2 }}>
+          Alerta Mensal de Faltas — Visão Geral (todas as turmas)
+        </Typography>
 
-    const columns: GridColDef[] = [
-        {
-            field: "foto",
-            headerName: "Foto",
-            width: 70,
-            renderCell: (params) => (
-                <Avatar
-                    src={params.value}
-                    sx={{
-                        backgroundColor: "white",
-                        marginTop: "5px",
-                        marginBottom: "5px", cursor: "pointer"
-                    }}
-                    onClick={() => handlePhotoClick(params.value)}
-                />
-            ),
-        },
-        { field: "nome", headerName: "Nome", width: 250, cellClassName: 'cell-wrap' },
-        { field: "anoNascimento", headerName: "Nascimento", width: 100, cellClassName: 'cell-wrap' },
-        { field: "dataMatricula", headerName: "Data de Matrícula", width: 150, cellClassName: 'cell-wrap' },
-        { field: "rg", headerName: "RG", width: 200, cellClassName: 'cell-wrap' },
-        { field: "uniforme", headerName: "Uniforme", width: 100, cellClassName: 'cell-wrap' },
-        { field: "telefoneComWhatsapp", headerName: "Telefone com WhatsApp", width: 250, cellClassName: 'cell-wrap' },
-        { field: "turma", headerName: "Turma", width: 250, cellClassName: 'cell-wrap' },
-        { field: "irmaos", headerName: "Irmãos", width: 150, cellClassName: 'cell-wrap' },
-        { field: "nomefuncionarioJBS", headerName: "Funcionário JBS", width: 150, cellClassName: 'cell-wrap' },
-        { field: "nomefuncionariomarcopolo", headerName: "Funcionário Marcopolo", width: 180, cellClassName: 'cell-wrap' },
-        { field: "endereco", headerName: "Endereço", width: 250, cellClassName: 'cell-wrap' },
-        { field: "pagadorMensalidadesNome", headerName: "Pagador de Mensalidades", width: 250, cellClassName: 'cell-wrap' },
-        { field: "pagadorMensalidadesCpf", headerName: "CPF do Pagador", width: 200, cellClassName: 'cell-wrap' },
-        { field: "pagadorMensalidadesEmail", headerName: "Email do Pagador", width: 250, cellClassName: 'cell-wrap' },
-        { field: "pagadorMensalidadesCelular", headerName: "Celular do Pagador", width: 250, cellClassName: 'cell-wrap' },
-    ];
+        <Paper sx={{ p: 2, mb: 2 }}>
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+            <FormControl fullWidth>
+              <InputLabel>Mês</InputLabel>
+              <Select
+                label="Mês"
+                value={mesSel}
+                onChange={(e: SelectChangeEvent<string>) => setMesSel(e.target.value)}
+              >
+                {MESES_PT.map((m) => (
+                  <MenuItem key={m} value={m}>
+                    {m.charAt(0).toUpperCase() + m.slice(1)}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
 
-    return (
-        <>
-            <ResponsiveAppBar />
-            <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", flexDirection: "column" }}>
-                <Box sx={{ height: 800, width: '95%', position: 'relative', marginTop: "10px" }}>
-                    <StyledDataGrid
-                        disableRowSelectionOnClick
-                        checkboxSelection={false}
-                        paginationModel={paginationModel}
-                        onPaginationModelChange={setPaginationModel}
-                        pageSizeOptions={[PAGE_SIZE]}
-                        slots={{
-                            pagination: CustomPagination,
-                            toolbar: GridToolbar,
-                        }}
-                        slotProps={{
-                            toolbar: {
-                                showQuickFilter: true,
-                            },
-                        }}
-                        rows={mergedRows}
-                        columns={columns}
-                        onCellClick={handleCellClick}
-                        sx={{
-                            '& .MuiDataGrid-columnHeaders': {
-                                position: 'sticky',
-                                top: 0,
-                                zIndex: 1,
-                            },
-                            '& .MuiDataGrid-cell': {
-                                whiteSpace: 'normal',
-                                wordWrap: 'break-word',
-                                overflow: 'visible',
-                            },
-                        }}
-                    />
-                </Box>
-                <Dialog open={!!selectedPhoto} onClose={handleClose} maxWidth="sm" fullWidth>
-                    <DialogTitle>
-                        <IconButton
-                            edge="end"
-                            color="inherit"
-                            onClick={handleClose}
-                            aria-label="close"
-                        >
-                            <CloseIcon />
-                        </IconButton>
-                    </DialogTitle>
-                    <DialogContent>
-                        <img src={selectedPhoto!} alt="Aluno" style={{ width: '100%' }} />
-                    </DialogContent>
-                </Dialog>
-                <Snackbar
-                    open={openSnackbar}
-                    autoHideDuration={3000}
-                    onClose={handleSnackbarClose}
-                >
-                    <Alert onClose={handleSnackbarClose} severity="success" sx={{ width: '100%' }}>
-                        Conteúdo copiado com sucesso!
-                    </Alert>
-                </Snackbar>
-            </Box>
-        </>
-    );
+            <TextField
+              label="Limite de faltas"
+              type="number"
+              inputProps={{ min: 1 }}
+              value={limiteFaltas}
+              onChange={(e) => setLimiteFaltas(Math.max(1, Number(e.target.value || 1)))}
+              fullWidth
+            />
+          </Stack>
+
+          <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 2, flexWrap: 'wrap' }}>
+            <Chip
+              label={`Total de turmas analisadas: ${todasTurmas.length}`}
+              variant="outlined"
+            />
+            <Chip
+              color={linhasComMuitasFaltas.length > 0 ? 'error' : 'default'}
+              label={`Alunos com ${limiteFaltas}+ faltas: ${linhasComMuitasFaltas.length}`}
+            />
+            <Chip
+              label="Regra: ignora dias futuros e conta só dias com chamada."
+              size="small"
+              variant="outlined"
+            />
+          </Stack>
+        </Paper>
+
+        <Paper sx={{ p: 2 }}>
+          {linhasComMuitasFaltas.length === 0 ? (
+            <Typography>Nenhum aluno atingiu o limite no mês selecionado.</Typography>
+          ) : (
+            <>
+              <Typography sx={{ mb: 1, fontWeight: 'bold' }}>
+                Resultado ({linhasComMuitasFaltas.length})
+              </Typography>
+              <Divider sx={{ mb: 2 }} />
+              <Table size="small" stickyHeader>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Aluno</TableCell>
+                    <TableCell>Modalidade</TableCell>
+                    <TableCell>Turma</TableCell>
+                    <TableCell align="center">Faltas</TableCell>
+                    <TableCell align="center">Presenças</TableCell>
+                    <TableCell align="center">Frequência (%)</TableCell>
+                    <TableCell align="center">Contato</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {linhasComMuitasFaltas.map((linha, idx) => {
+                    const link = waLink(linha.telefone);
+                    return (
+                      <TableRow key={`${linha.alunoNome}-${linha.turmaNome}-${idx}`}>
+                        <TableCell>{linha.alunoNome}</TableCell>
+                        <TableCell>{linha.modalidade}</TableCell>
+                        <TableCell>{linha.turmaNome}</TableCell>
+                        <TableCell align="center">
+                          <Chip color="error" label={linha.faltas} size="small" />
+                        </TableCell>
+                        <TableCell align="center">{linha.presencas}</TableCell>
+                        <TableCell align="center">{linha.freq}</TableCell>
+                        <TableCell align="center">
+                          {link ? (
+                            <IconButton
+                              size="small"
+                              component="a"
+                              href={link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label="WhatsApp"
+                            >
+                              <OpenInNewIcon fontSize="small" />
+                            </IconButton>
+                          ) : (
+                            '-'
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </>
+          )}
+        </Paper>
+      </Container>
+    </Layout>
+  );
 }
