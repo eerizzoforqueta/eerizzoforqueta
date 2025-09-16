@@ -68,12 +68,7 @@ export default function ManageTurmas() {
   const [successMessage, setSuccessMessage] = useState('');
   const [capacidadeInvalida, setCapacidadeInvalida] = useState(false);
 
-  // ⚠️ Adicionamos "FEMININO" como opção de categoria, e mantivemos suas combinações existentes
-  const categorias = [
-    'SUB07', 'SUB08', 'SUB09', 'SUB10', 'SUB11', 'SUB12', 'SUB13', 'SUB14', 'SUB15_17',
-    'SUB07_SUB09', 'SUB09_SUB11', 'SUB13_SUB15', 'SUB11_SUB13',
-    'FEMININO', // NOVO: se preferir cadastrar como categoria
-  ];
+  const categorias = ['SUB07', 'SUB08', 'SUB09', 'SUB10', 'SUB11', 'SUB12', 'SUB13', 'SUB14', 'SUB15_17','SUB07_SUB09','SUB09_SUB11','SUB13_SUB15'];
 
   useEffect(() => {
     fetchModalidades().then((data) => {
