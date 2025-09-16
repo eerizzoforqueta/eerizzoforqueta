@@ -17,15 +17,16 @@ import {
   Alert,
   Divider,
   SelectChangeEvent,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import axios from 'axios';
-import { useRouter } from 'next/router';
-import { useSession } from 'next-auth/react';
 import { Modalidade, Turma } from '@/interface/interfaces';
 import { useData } from '@/context/context';
 import { BoxStyleCadastro } from '@/utils/Styles';
 import Layout from '@/components/TopBarComponents/Layout';
 import MergeTurmasForm from "@/components/MergeTurmasForm";
+
 interface TabPanelProps {
   children?: React.ReactNode;
   value: number;
@@ -35,18 +36,8 @@ interface TabPanelProps {
 function TabPanel(props: TabPanelProps) {
   const { children, value, index, ...other } = props;
   return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`tabpanel-${index}`}
-      aria-labelledby={`tab-${index}`}
-      {...other}
-    >
-      {value === index && (
-        <Box sx={{ p: 3, bgcolor: 'background.paper' }}>
-          {children}
-        </Box>
-      )}
+    <div role="tabpanel" hidden={value !== index} id={`tab-${index}`} aria-labelledby={`tab-${index}`} {...other}>
+      {value === index && <Box sx={{ p: 3, bgcolor: 'background.paper' }}>{children}</Box>}
     </div>
   );
 }
@@ -56,54 +47,56 @@ export default function ManageTurmas() {
   const [tabIndex, setTabIndex] = useState(0);
   const [modalidades, setModalidades] = useState<Modalidade[]>([]);
   const [selectedModalidade, setSelectedModalidade] = useState<string>('');
-  // Inicializamos selectedTurma como undefined
   const [turmas, setTurmas] = useState<Turma[]>([]);
   const [selectedTurma, setSelectedTurma] = useState<Turma | undefined>(undefined);
-  const [formValues, setFormValues] = useState<Omit<Turma, 'uuidTurma' | 'nome_da_turma' | 'capacidade_atual_da_turma' | 'contadorAlunos' | 'alunos'>>({
+
+  const [formValues, setFormValues] = useState<Omit<
+    Turma,
+    'uuidTurma' | 'nome_da_turma' | 'capacidade_atual_da_turma' | 'alunos'
+  >>({
     modalidade: '',
     nucleo: '',
     categoria: '',
     diaDaSemana: '',
     horario: '',
     capacidade_maxima_da_turma: 1,
+    isFeminina: false, // NOVO
   });
+
   const [nomeTurma, setNomeTurma] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [capacidadeInvalida, setCapacidadeInvalida] = useState(false);
 
-  const categorias = ['SUB07', 'SUB08', 'SUB09', 'SUB10', 'SUB11', 'SUB12', 'SUB13', 'SUB14', 'SUB15_17','SUB07_SUB09','SUB09_SUB11','SUB13_SUB15'];
+  // ⚠️ Adicionamos "FEMININO" como opção de categoria, e mantivemos suas combinações existentes
+  const categorias = [
+    'SUB07', 'SUB08', 'SUB09', 'SUB10', 'SUB11', 'SUB12', 'SUB13', 'SUB14', 'SUB15_17',
+    'SUB07_SUB09', 'SUB09_SUB11', 'SUB13_SUB15', 'SUB11_SUB13',
+    'FEMININO', // NOVO: se preferir cadastrar como categoria
+  ];
 
   useEffect(() => {
     fetchModalidades().then((data) => {
-      const validModalidades = data.filter(
-        (mod) => mod.nome !== 'arquivados' && mod.nome !== 'excluidos'
-      );
-      setModalidades(validModalidades);
+      const valid = data.filter((m) => m.nome !== 'arquivados' && m.nome !== 'excluidos');
+      setModalidades(valid);
     });
   }, [fetchModalidades]);
 
-  // Converte modalidadeEscolhida.turmas para array caso não seja, garantindo o tipo Turma[]
   useEffect(() => {
     if (selectedModalidade) {
-      const modalidadeEscolhida = modalidades.find(
-        (modalidade) => modalidade.nome === selectedModalidade
-      );
-      const turmasArray =
-        modalidadeEscolhida && modalidadeEscolhida.turmas
-          ? Array.isArray(modalidadeEscolhida.turmas)
-            ? modalidadeEscolhida.turmas
-            : (Object.values(modalidadeEscolhida.turmas) as Turma[])
-          : [];
+      const modalidadeEscolhida = modalidades.find((m) => m.nome === selectedModalidade);
+      const turmasArray = modalidadeEscolhida?.turmas
+        ? Array.isArray(modalidadeEscolhida.turmas)
+          ? modalidadeEscolhida.turmas
+          : (Object.values(modalidadeEscolhida.turmas) as Turma[])
+        : [];
       setTurmas(turmasArray);
     }
   }, [selectedModalidade, modalidades]);
 
   useEffect(() => {
     if (selectedTurma) {
-      setCapacidadeInvalida(
-        formValues.capacidade_maxima_da_turma < selectedTurma.capacidade_atual_da_turma
-      );
+      setCapacidadeInvalida(formValues.capacidade_maxima_da_turma < selectedTurma.capacidade_atual_da_turma);
     }
   }, [formValues.capacidade_maxima_da_turma, selectedTurma]);
 
@@ -111,26 +104,25 @@ export default function ManageTurmas() {
     updateNomeTurma(formValues);
   }, [formValues]);
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setTabIndex(newValue);
-  };
+  const handleTabChange = (_: React.SyntheticEvent, newValue: number) => setTabIndex(newValue);
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    const updatedValues = {
-      ...formValues,
-      [name]: name === 'capacidade_maxima_da_turma' ? Number(value) : value,
-    };
+    const { name, value, type, checked } = e.target as HTMLInputElement;
+    const parsed =
+      name === 'capacidade_maxima_da_turma'
+        ? Number(value)
+        : type === 'checkbox'
+        ? checked
+        : value;
+
+    const updatedValues: any = { ...formValues, [name]: parsed };
     setFormValues(updatedValues);
     updateNomeTurma(updatedValues);
   };
 
   const handleSelectChange = (event: SelectChangeEvent<string>) => {
     const { name, value } = event.target;
-    const updatedValues = {
-      ...formValues,
-      [name]: value,
-    };
+    const updatedValues: any = { ...formValues, [name as string]: value };
     setFormValues(updatedValues);
     updateNomeTurma(updatedValues);
   };
@@ -140,13 +132,14 @@ export default function ManageTurmas() {
     const turma = turmas.find((t) => t.uuidTurma === uuid);
     if (turma) {
       setSelectedTurma(turma);
-      const updatedValues = {
+      const updatedValues: any = {
         modalidade: turma.modalidade,
         nucleo: turma.nucleo,
         categoria: turma.categoria,
         diaDaSemana: turma.diaDaSemana,
         horario: turma.horario,
         capacidade_maxima_da_turma: turma.capacidade_maxima_da_turma,
+        isFeminina: !!turma.isFeminina, // NOVO
       };
       setFormValues(updatedValues);
       setNomeTurma(turma.nome_da_turma);
@@ -156,9 +149,9 @@ export default function ManageTurmas() {
   };
 
   const updateNomeTurma = (values: typeof formValues) => {
-    const { categoria, nucleo, diaDaSemana, horario } = values;
-    const nome_da_turma = `${categoria}_${nucleo}_${diaDaSemana}_${horario}`;
-    setNomeTurma(nome_da_turma);
+    const { categoria, nucleo, diaDaSemana, horario, isFeminina } = values;
+    const base = `${categoria}_${nucleo}_${diaDaSemana}_${horario}`;
+    setNomeTurma(isFeminina ? `${base} - FEMININO` : base);
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -168,15 +161,27 @@ export default function ManageTurmas() {
       if (selectedTurma) {
         await axios.put('/api/HandleNewTurmas', {
           uuidTurma: selectedTurma.uuidTurma,
-          nome_da_turma: nomeTurma,
-          capacidade_maxima_da_turma: formValues.capacidade_maxima_da_turma,
           modalidade: selectedTurma.modalidade,
           nucleo: formValues.nucleo,
           categoria: formValues.categoria,
+          diaDaSemana: formValues.diaDaSemana,
+          horario: formValues.horario,
+          capacidade_maxima_da_turma: formValues.capacidade_maxima_da_turma,
+          isFeminina: formValues.isFeminina, // NOVO
+          // opcionalmente envie nome_da_turma se quiser forçar
+          // nome_da_turma: nomeTurma,
         });
         setSuccessMessage('Turma atualizada com sucesso!');
       } else {
-        await axios.post('/api/HandleNewTurmas', { ...formValues, nome_da_turma: nomeTurma });
+        await axios.post('/api/HandleNewTurmas', {
+          modalidade: formValues.modalidade,
+          nucleo: formValues.nucleo,
+          categoria: formValues.categoria,
+          diaDaSemana: formValues.diaDaSemana,
+          horario: formValues.horario,
+          capacidade_maxima_da_turma: formValues.capacidade_maxima_da_turma,
+          isFeminina: formValues.isFeminina, // NOVO
+        });
         setSuccessMessage('Turma criada com sucesso!');
       }
     } catch (error) {
@@ -190,6 +195,7 @@ export default function ManageTurmas() {
         diaDaSemana: '',
         horario: '',
         capacidade_maxima_da_turma: 1,
+        isFeminina: false,
       });
       setNomeTurma('');
       setSelectedTurma(undefined);
@@ -217,6 +223,7 @@ export default function ManageTurmas() {
         diaDaSemana: '',
         horario: '',
         capacidade_maxima_da_turma: 1,
+        isFeminina: false,
       });
       setNomeTurma('');
       setSelectedTurma(undefined);
@@ -228,156 +235,190 @@ export default function ManageTurmas() {
       <Container sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 0 }}>
         <Box sx={BoxStyleCadastro}>
           <AppBar position="static" sx={{ backgroundColor: '#2e3b55', mt: '10px' }}>
-            <Tabs
-              value={tabIndex}
-              onChange={handleTabChange}
-              variant="fullWidth"
-              textColor="inherit"
-              indicatorColor="secondary"
-            >
+            <Tabs value={tabIndex} onChange={(_, v) => setTabIndex(v)} variant="fullWidth" textColor="inherit" indicatorColor="secondary">
               <Tab label="Criar Turma" />
               <Tab label="Atualizar Turma" />
               <Tab label="Excluir Turma" />
               <Tab label="Mesclar Turmas" />
             </Tabs>
           </AppBar>
+
+          {/* CRIAR TURMA */}
           <TabPanel value={tabIndex} index={0}>
             <form onSubmit={handleSubmit}>
               <FormControl fullWidth margin="normal">
                 <InputLabel>Modalidade</InputLabel>
                 <Select name="modalidade" value={formValues.modalidade} onChange={handleSelectChange} required>
-                  {modalidades.map((modalidade) => (
-                    <MenuItem key={modalidade.nome} value={modalidade.nome}>
-                      {modalidade.nome}
-                    </MenuItem>
+                  {modalidades.map((m) => (
+                    <MenuItem key={m.nome} value={m.nome}>{m.nome}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
+
               <TextField label="Núcleo" name="nucleo" value={formValues.nucleo} onChange={handleInputChange} required fullWidth margin="normal" />
+
               <FormControl fullWidth margin="normal">
                 <InputLabel>Categoria</InputLabel>
                 <Select name="categoria" value={formValues.categoria} onChange={handleSelectChange} required>
-                  {categorias.map((categoria) => (
-                    <MenuItem key={categoria} value={categoria}>
-                      {categoria}
-                    </MenuItem>
+                  {categorias.map((c) => (
+                    <MenuItem key={c} value={c}>{c}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
+
               <FormControl fullWidth margin="normal">
                 <InputLabel>Dia da Semana</InputLabel>
                 <Select name="diaDaSemana" value={formValues.diaDaSemana} onChange={handleSelectChange} required>
                   {['SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA', 'SÁBADO'].map((dia) => (
-                    <MenuItem key={dia} value={dia}>
-                      {dia}
-                    </MenuItem>
+                    <MenuItem key={dia} value={dia}>{dia}</MenuItem>
                   ))}
                 </Select>
               </FormControl>
+
               <TextField label="Horário" name="horario" value={formValues.horario} onChange={handleInputChange} required fullWidth margin="normal" />
-              <TextField type="number" label="Capacidade Máxima" name="capacidade_maxima_da_turma" value={formValues.capacidade_maxima_da_turma.toString()} onChange={handleInputChange} required fullWidth margin="normal" />
+
+              <TextField
+                type="number"
+                label="Capacidade Máxima"
+                name="capacidade_maxima_da_turma"
+                value={formValues.capacidade_maxima_da_turma.toString()}
+                onChange={handleInputChange}
+                required
+                fullWidth
+                margin="normal"
+              />
+
+              <FormControlLabel
+                control={<Checkbox name="isFeminina" checked={!!formValues.isFeminina} onChange={handleInputChange} />}
+                label="Turma Feminina (todas as idades)"
+                sx={{color:"black"}}
+              />
+
               {capacidadeInvalida && (
                 <Typography color="error" variant="body2">
-                  A capacidade máxima não pode ser menor que o número atual de alunos (
-                  {selectedTurma?.capacidade_atual_da_turma}).
+                  A capacidade máxima não pode ser menor que o número atual de alunos ({selectedTurma?.capacidade_atual_da_turma}).
                 </Typography>
               )}
+
               <TextField label="Nome da Turma" value={nomeTurma} onChange={() => {}} fullWidth margin="normal" disabled />
+
               <Button type="submit" variant="contained" color="primary" disabled={loading || capacidadeInvalida}>
                 Criar Turma
               </Button>
             </form>
           </TabPanel>
+
+          {/* ATUALIZAR TURMA */}
           <TabPanel value={tabIndex} index={1}>
             <FormControl fullWidth margin="normal">
               <InputLabel>Modalidade</InputLabel>
               <Select value={selectedModalidade} onChange={(e) => setSelectedModalidade(e.target.value as string)} required>
-                {modalidades.map((modalidade) => (
-                  <MenuItem key={modalidade.nome} value={modalidade.nome}>
-                    {modalidade.nome}
-                  </MenuItem>
+                {modalidades.map((m) => (
+                  <MenuItem key={m.nome} value={m.nome}>{m.nome}</MenuItem>
                 ))}
               </Select>
             </FormControl>
+
             <Divider sx={{ my: 2 }} />
+
             <FormControl fullWidth margin="normal">
               <InputLabel>Turma</InputLabel>
               <Select value={selectedTurma ? selectedTurma.uuidTurma : ''} onChange={handleTurmaSelectChange} required>
-                {turmas.map((turma) => (
-                  <MenuItem key={turma.uuidTurma} value={turma.uuidTurma}>
-                    {turma.nome_da_turma}
-                  </MenuItem>
+                {turmas.map((t) => (
+                  <MenuItem key={t.uuidTurma} value={t.uuidTurma}>{t.nome_da_turma}</MenuItem>
                 ))}
               </Select>
             </FormControl>
+
             {selectedTurma && (
               <form onSubmit={handleSubmit}>
                 <TextField label="Núcleo" name="nucleo" value={formValues.nucleo} onChange={handleInputChange} required fullWidth margin="normal" />
+
                 <FormControl fullWidth margin="normal">
                   <InputLabel>Categoria</InputLabel>
                   <Select name="categoria" value={formValues.categoria} onChange={handleSelectChange} required>
-                    {categorias.map((categoria) => (
-                      <MenuItem key={categoria} value={categoria}>
-                        {categoria}
-                      </MenuItem>
+                    {categorias.map((c) => (
+                      <MenuItem key={c} value={c}>{c}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>
+
                 <FormControl fullWidth margin="normal">
                   <InputLabel>Dia da Semana</InputLabel>
                   <Select name="diaDaSemana" value={formValues.diaDaSemana} onChange={handleSelectChange} required>
                     {['SEGUNDA', 'TERÇA', 'QUARTA', 'QUINTA', 'SEXTA', 'SÁBADO'].map((dia) => (
-                      <MenuItem key={dia} value={dia}>
-                        {dia}
-                      </MenuItem>
+                      <MenuItem key={dia} value={dia}>{dia}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>
+
                 <TextField label="Horário" name="horario" value={formValues.horario} onChange={handleInputChange} required fullWidth margin="normal" />
-                <TextField type="number" label="Capacidade Máxima" name="capacidade_maxima_da_turma" value={formValues.capacidade_maxima_da_turma.toString()} onChange={handleInputChange} required fullWidth margin="normal" />
+
+                <TextField
+                  type="number"
+                  label="Capacidade Máxima"
+                  name="capacidade_maxima_da_turma"
+                  value={formValues.capacidade_maxima_da_turma.toString()}
+                  onChange={handleInputChange}
+                  required
+                  fullWidth
+                  margin="normal"
+                />
+
+                <FormControlLabel
+                  control={<Checkbox name="isFeminina" checked={!!formValues.isFeminina} onChange={handleInputChange} />}
+                  label="Turma Feminina (todas as idades)"
+                />
+
                 {capacidadeInvalida && (
                   <Typography color="error" variant="body2">
                     A capacidade máxima não pode ser menor que o número atual de alunos ({selectedTurma.capacidade_atual_da_turma}).
                   </Typography>
                 )}
+
                 <TextField label="Nome da Turma" value={nomeTurma} onChange={() => {}} fullWidth margin="normal" disabled />
+
                 <Button type="submit" variant="contained" color="primary" disabled={loading || capacidadeInvalida}>
                   Atualizar Turma
                 </Button>
               </form>
             )}
           </TabPanel>
+
+          {/* EXCLUIR TURMA */}
           <TabPanel value={tabIndex} index={2}>
             <FormControl fullWidth margin="normal">
               <InputLabel>Modalidade</InputLabel>
               <Select value={selectedModalidade} onChange={(e) => setSelectedModalidade(e.target.value as string)} required>
-                {modalidades.map((modalidade) => (
-                  <MenuItem key={modalidade.nome} value={modalidade.nome}>
-                    {modalidade.nome}
-                  </MenuItem>
+                {modalidades.map((m) => (
+                  <MenuItem key={m.nome} value={m.nome}>{m.nome}</MenuItem>
                 ))}
               </Select>
             </FormControl>
+
             <Divider sx={{ my: 2 }} />
+
             <FormControl fullWidth margin="normal">
               <InputLabel>Turma</InputLabel>
               <Select value={selectedTurma ? selectedTurma.uuidTurma : ''} onChange={handleTurmaSelectChange} required>
-                {turmas.map((turma) => (
-                  <MenuItem key={turma.uuidTurma} value={turma.uuidTurma}>
-                    {turma.nome_da_turma}
-                  </MenuItem>
+                {turmas.map((t) => (
+                  <MenuItem key={t.uuidTurma} value={t.uuidTurma}>{t.nome_da_turma}</MenuItem>
                 ))}
               </Select>
             </FormControl>
+
             {selectedTurma && (
               <Button variant="contained" color="secondary" onClick={handleDelete} disabled={loading}>
                 {loading ? 'Aguarde, deletando turma' : 'Deletar Turma'}
               </Button>
             )}
           </TabPanel>
+
+          {/* MESCLAR TURMAS */}
           <TabPanel value={tabIndex} index={3}>
-             <MergeTurmasForm />;
+            <MergeTurmasForm />
           </TabPanel>
+
           <Snackbar open={!!successMessage} autoHideDuration={6000} onClose={() => setSuccessMessage('')}>
             <Alert onClose={() => setSuccessMessage('')} severity="success" sx={{ width: '100%' }}>
               {successMessage}

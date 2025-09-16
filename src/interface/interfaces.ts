@@ -186,6 +186,7 @@ export interface Turma {
   uuidTurma?:string
   diaDaSemana?:string
   horario?:string
+  isFeminina?: boolean
 }
 
 export interface AlunoComTurma {
