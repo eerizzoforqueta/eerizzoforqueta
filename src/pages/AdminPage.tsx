@@ -31,6 +31,7 @@ import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AutoDeleteIcon from '@mui/icons-material/AutoDelete';
 import ChangeCircleIcon from '@mui/icons-material/ChangeCircle';
+import AvisosFaltasConsecutivas from '@/components/AvisosFaltasConsecutivas'
 const drawerWidth = 280
 export default function AdminPage() {
   const [mobileOpen, setMobileOpen] = React.useState(false)
@@ -190,6 +191,9 @@ const drawer = (
           <TurmasInfoTableNoSSR />
         </Box>
       </Grid>
+      <Box sx={{ mt: 3 }}>
+        <AvisosFaltasConsecutivas />
+      </Box>
       <Toolbar />
     </Box>
   </Box>
