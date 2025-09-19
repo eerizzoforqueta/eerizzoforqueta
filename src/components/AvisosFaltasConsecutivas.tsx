@@ -267,7 +267,7 @@ export default function AvisosFaltasConsecutivas() {
         }}
       >
         <Typography variant="h6" sx={{ flexGrow: 1 }}>
-          Alunos com 3 faltas consecutivas ({linhasFiltradas.length})
+          Alunos com 3 ou mais faltas consecutivas ({linhasFiltradas.length})
         </Typography>
 
         <TextField
