@@ -1,32 +1,29 @@
-// src/components/AvisosFaltasConsecutivas.tsx
 'use client';
-
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  Box,
-  Chip,
-  Divider,
-  FormControl,
-  IconButton,
-  InputLabel,
-  MenuItem,
   Paper,
-  Select,
-  SelectChangeEvent,
+  Box,
+  Typography,
   Stack,
+  Chip,
+  TableContainer,
   Table,
-  TableBody,
-  TableCell,
   TableHead,
   TableRow,
-  Typography,
-  InputAdornment,
+  TableCell,
+  TableBody,
   TextField,
+  MenuItem,
+  InputAdornment,
+  IconButton,
+  Switch,
+  FormControlLabel,
 } from '@mui/material';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import SearchIcon from '@mui/icons-material/Search';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { useData } from '@/context/context';
-import { Aluno, Modalidade, Turma } from '@/interface/interfaces';
+import { Modalidade, Turma, Aluno } from '@/interface/interfaces';
+import { AvisoStudents } from '@/components/AvisosModal/Avisos';
 
 const MESES_PT = [
   'janeiro',
@@ -41,288 +38,399 @@ const MESES_PT = [
   'outubro',
   'novembro',
   'dezembro',
-];
+] as const;
+type MesStr = (typeof MESES_PT)[number];
 
-function monthNowPT(): string {
-  const now = new Date();
-  return MESES_PT[now.getMonth()];
-}
-
-function normalizeAlunos(alunos: unknown): Aluno[] {
-  if (!alunos) return [];
-  const arr = Array.isArray(alunos) ? alunos : Object.values(alunos as Record<string, unknown>);
-  return (arr as Aluno[]).filter(Boolean);
-}
-
-function ordenarDiaKey(a: string, b: string) {
-  // "D-M-YYYY"
-  const pa = a.split('-').map((n) => parseInt(n, 10));
-  const pb = b.split('-').map((n) => parseInt(n, 10));
-  // ano, mês, dia – para ordenação robusta entre meses distintos se necessário
-  const da = new Date(pa[2], pa[1] - 1, pa[0]).getTime();
-  const db = new Date(pb[2], pb[1] - 1, pb[0]).getTime();
-  return da - db;
-}
-
-function parseKeyToDate(key: string): Date | null {
-  const [d, m, y] = key.split('-').map((n) => parseInt(n, 10));
-  if (!d || !m || !y) return null;
-  const dt = new Date(y, m - 1, d);
-  return isNaN(dt.getTime()) ? null : dt;
-}
-
-function norm(s: string) {
-  return (s || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-}
+const COLS = {
+  aluno: 220,
+  modalidade: 120,
+  turma: 320,
+  categoria: 140,
+  nucleo: 160,
+  datas: 260,
+  faltas: 110,
+  freq: 110,
+  contato: 90,
+  aviso: 90,
+} as const;
 
 type LinhaAviso = {
-  id: string; // para key
+  id: string;                 // único por aluno+turma
   alunoNome: string;
   modalidade: string;
   turmaNome: string;
-  nucleo?: string;
-  categoria?: string;
-  datasSequencia: string[]; // as 3 datas mais recentes da sequência
-  faltasSeguidas: number;   // tamanho da sequência final (>=3)
-  freqMes: string;          // frequência do mês em %
+  categoria: string;
+  nucleo: string;
   telefone?: string | number;
+  datasSequencia: string[];   // as 3 datas detectadas
+  faltasSeguidas: number;     // normalmente 3+
+  freqMes: string;            // "54.5" etc
 };
+
+function normalizar(t: unknown) {
+  return (t ?? '').toString().trim().toLowerCase();
+}
+
+function parseDayNumber(key: string): number {
+  // key no formato "d-m-YYYY"
+  const [d] = key.split('-');
+  const n = parseInt(d, 10);
+  return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+}
+
+function sortByDayKeyAsc(a: string, b: string) {
+  return parseDayNumber(a) - parseDayNumber(b);
+}
+
+function monthNameFromDate(d: Date): MesStr {
+  return MESES_PT[d.getMonth()];
+}
+
+function cleanPhoneToWa(n: string | number | undefined): string | null {
+  if (!n) return null;
+  const onlyDigits = String(n).replace(/\D/g, '');
+  // Brasil: tentar 11 dígitos (DD + 9 + número)
+  if (onlyDigits.length < 10) return null;
+  return `https://wa.me/55${onlyDigits}`;
+}
 
 export default function AvisosFaltasConsecutivas() {
   const { fetchModalidades } = useData();
-  const [modalidades, setModalidades] = useState<Modalidade[]>([]);
-  const [mesSel, setMesSel] = useState<string>(monthNowPT());
-  const [busca, setBusca] = useState<string>('');
 
-  // Configurações
-  const LIMIAR = 3;          // 3 faltas consecutivas
-  const IGNORAR_FUTURO = true;
+  // mês padrão = mês atual
+  const [mes, setMes] = useState<MesStr>(monthNameFromDate(new Date()));
+  const [query, setQuery] = useState('');
+  const [ignoreFuture, setIgnoreFuture] = useState(true);
+  const [modalidades, setModalidades] = useState<Modalidade[]>([]);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    let active = true;
+    setLoading(true);
     fetchModalidades()
       .then((mods) => {
+        if (!active) return;
+        // filtra “arquivados / excluidos / temporarios”
         const valid = mods.filter(
           (m) =>
-            m.nome.toLowerCase() !== 'arquivados' &&
-            m.nome.toLowerCase() !== 'excluidos' &&
-            m.nome.toLowerCase() !== 'temporarios'
+            !!m &&
+            !['arquivados', 'excluidos', 'temporarios'].includes(
+              m.nome.toLowerCase()
+            )
         );
         setModalidades(valid);
       })
-      .catch(console.error);
+      .finally(() => active && setLoading(false));
+    return () => {
+      active = false;
+    };
   }, [fetchModalidades]);
 
-  const todasTurmas = useMemo(() => {
-    const itens: { modalidade: string; turma: Turma; alunos: Aluno[] }[] = [];
-    modalidades.forEach((mod) => {
-      const turmas =
-        mod.turmas
-          ? (Array.isArray(mod.turmas) ? mod.turmas : (Object.values(mod.turmas) as Turma[]))
-          : [];
-      turmas.forEach((turma) => {
-        itens.push({
-          modalidade: mod.nome,
-          turma,
-          alunos: normalizeAlunos(turma.alunos),
-        });
-      });
-    });
-    return itens;
-  }, [modalidades]);
-
-  // Gera linhas apenas para quem tem >= 3 faltas consecutivas (naquele mês, por turma)
   const linhas: LinhaAviso[] = useMemo(() => {
-    const out: LinhaAviso[] = [];
     const hoje = new Date();
-    hoje.setHours(0, 0, 0, 0);
+    const hojeDia = hoje.getDate();
+    const hojeMes = monthNameFromDate(hoje);
+    const hojeAno = hoje.getFullYear();
 
-    todasTurmas.forEach(({ modalidade, turma, alunos }) => {
-      alunos.forEach((aluno) => {
-        const presencasMes = aluno.presencas?.[mesSel];
-        if (!presencasMes) return;
+    const out: LinhaAviso[] = [];
 
-        // Dias registrados no mês (ordenados)
-        let keys = Object.keys(presencasMes);
-        if (IGNORAR_FUTURO) {
-          keys = keys.filter((k) => {
-            const dt = parseKeyToDate(k);
-            return dt && dt.getTime() <= hoje.getTime();
-          });
-        }
-        if (keys.length === 0) return;
-        keys.sort(ordenarDiaKey);
+    modalidades.forEach((mod) => {
+      const turmasArr: Turma[] = Array.isArray(mod.turmas)
+        ? mod.turmas
+        : Object.values(mod.turmas || {}) as Turma[];
 
-        // Frequência do mês (considerando apenas dias existentes no mapa)
-        let pres = 0;
-        let falt = 0;
-        keys.forEach((k) => {
-          const v = presencasMes[k];
-          if (v === true) pres++;
-          else if (v === false) falt++;
-        });
-        const total = pres + falt;
-        const freqMes = total > 0 ? ((pres / total) * 100).toFixed(1) : '0.0';
+      turmasArr.forEach((turma) => {
+        const alunosArr: Aluno[] = Array.isArray(turma.alunos)
+          ? turma.alunos
+          : Object.values(turma.alunos || {}) as Aluno[];
 
-        // Detectar sequência de 3+ faltas consecutivas (F-F-F...)
-        let streak = 0;
-        const filaUltimasDatas: string[] = []; // guardará as últimas 3 datas da sequência
-        let temSequencia = false;
+        alunosArr
+          .filter(Boolean)
+          .forEach((aluno, idx) => {
+            const presMes = aluno.presencas?.[mes] || {};
+            // pega as datas (chaves) existentes
+            let dayKeys = Object.keys(presMes).sort(sortByDayKeyAsc);
 
-        keys.forEach((k) => {
-          const v = presencasMes[k];
-          if (v === false) {
-            streak += 1;
-            filaUltimasDatas.push(k);
-            if (filaUltimasDatas.length > 3) filaUltimasDatas.shift(); // manter só as 3 mais recentes
-            if (streak >= LIMIAR) {
-              temSequencia = true; // continua para ter a mais recente
+            // opcional: ignorar dias futuros (apenas se o mês for o atual)
+            if (ignoreFuture && mes === hojeMes) {
+              dayKeys = dayKeys.filter((k) => {
+                const [d, m, y] = k.split('-').map((n) => parseInt(n, 10));
+                if (!Number.isFinite(d) || !Number.isFinite(m) || !Number.isFinite(y))
+                  return false;
+                if (y > hojeAno) return false;
+                if (y < hojeAno) return true;
+                // mesmo ano
+                if (m > hoje.getMonth() + 1) return false;
+                if (m < hoje.getMonth() + 1) return true;
+                // mesmo mês
+                return d <= hojeDia;
+              });
             }
-          } else if (v === true) {
-            streak = 0;
-            filaUltimasDatas.length = 0;
-          }
-        });
 
-        if (temSequencia) {
-          out.push({
-            id: `${(aluno.informacoesAdicionais as any)?.IdentificadorUnico ?? aluno.id}-${turma.uuidTurma ?? turma.nome_da_turma}`,
-            alunoNome: aluno.nome,
-            modalidade,
-            turmaNome: turma.nome_da_turma,
-            nucleo: turma.nucleo,
-            categoria: turma.categoria,
-            datasSequencia: [...filaUltimasDatas], // as 3 últimas faltas dessa sequência
-            faltasSeguidas: streak, // tamanho final da sequência (>=3)
-            freqMes,
-            telefone: aluno.telefoneComWhatsapp,
+            if (dayKeys.length === 0) return;
+
+            // calcula frequência do mês (somente os dias considerados)
+            let presentes = 0;
+            let total = 0;
+            dayKeys.forEach((k) => {
+              const v = presMes[k];
+              if (typeof v === 'boolean') {
+                total += 1;
+                if (v) presentes += 1;
+              }
+            });
+            const freq = total > 0 ? ((presentes / total) * 100).toFixed(1) : '0.0';
+
+            // encontra a MAIOR sequência de falses consecutivos
+            let bestRunLen = 0;
+            let bestRunEndIdx = -1;
+            let curLen = 0;
+
+            dayKeys.forEach((k, i) => {
+              const v = !!presMes[k]; // true=presente, false=falta
+              if (!v) {
+                curLen += 1;
+                if (curLen > bestRunLen) {
+                  bestRunLen = curLen;
+                  bestRunEndIdx = i;
+                }
+              } else {
+                curLen = 0;
+              }
+            });
+
+            if (bestRunLen >= 3) {
+              // pega as 3 últimas datas dessa melhor sequência
+              const datasSequencia: string[] = [];
+              for (
+                let i = bestRunEndIdx - 2;
+                i <= bestRunEndIdx;
+                i += 1
+              ) {
+                const k = dayKeys[i];
+                if (k) datasSequencia.push(k);
+              }
+
+              out.push({
+                id: `${aluno.nome}-${turma.uuidTurma || turma.nome_da_turma}-${idx}`,
+                alunoNome: aluno.nome,
+                modalidade: turma.modalidade || mod.nome,
+                turmaNome: turma.nome_da_turma,
+                categoria: turma.categoria,
+                nucleo: turma.nucleo,
+                telefone: aluno.telefoneComWhatsapp,
+                datasSequencia,
+                faltasSeguidas: bestRunLen,
+                freqMes: freq,
+              });
+            }
           });
-        }
       });
     });
 
-    // Ordena: mais faltas consecutivas primeiro; depois por nome
-    out.sort((a, b) => (b.faltasSeguidas - a.faltasSeguidas) || a.alunoNome.localeCompare(b.alunoNome));
+    // ordena por nome
+    out.sort((a, b) => a.alunoNome.localeCompare(b.alunoNome));
     return out;
-  }, [todasTurmas, mesSel]);
+  }, [modalidades, mes, ignoreFuture]);
 
   const linhasFiltradas = useMemo(() => {
-    const q = norm(busca);
+    const q = normalizar(query);
     if (!q) return linhas;
-    return linhas.filter(
-      (l) =>
-        norm(l.alunoNome).includes(q) ||
-        norm(l.modalidade).includes(q) ||
-        norm(l.turmaNome).includes(q) ||
-        norm(l.categoria || '').includes(q) ||
-        norm(l.nucleo || '').includes(q)
-    );
-  }, [linhas, busca]);
-
-  function waLink(raw: string | number | undefined) {
-    if (!raw) return null;
-    const digits = String(raw).replace(/\D/g, '');
-    if (!digits) return null;
-    const msg = encodeURIComponent(
-      `Olá! Notamos ${3}+ faltas consecutivas neste mês. Está tudo bem? Contamos com a presença nos próximos treinos.`
-    );
-    return `https://wa.me/55${digits}?text=${msg}`;
-  }
+    return linhas.filter((l) => {
+      return (
+        normalizar(l.alunoNome).includes(q) ||
+        normalizar(l.modalidade).includes(q) ||
+        normalizar(l.turmaNome).includes(q) ||
+        normalizar(l.categoria).includes(q) ||
+        normalizar(l.nucleo).includes(q)
+      );
+    });
+  }, [linhas, query]);
 
   return (
-    <Paper sx={{ mt: 4, p: 2 }}>
-      <Typography variant="h6" sx={{ mb: 1, fontWeight: 'bold' }}>
-        Avisos — Alunos com 3+ faltas consecutivas (todas as turmas)
-      </Typography>
-
-      <Stack
-        direction={{ xs: 'column', md: 'row' }}
-        spacing={2}
-        alignItems={{ xs: 'stretch', md: 'center' }}
-        sx={{ mb: 2 }}
+    <Paper sx={{ mt: 4, p: 2, width: '100%' }}>
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 2,
+          alignItems: 'center',
+          mb: 2,
+        }}
       >
-        <FormControl sx={{ minWidth: 220 }}>
-          <InputLabel>Mês</InputLabel>
-          <Select
-            label="Mês"
-            value={mesSel}
-            onChange={(e: SelectChangeEvent<string>) => setMesSel(e.target.value)}
-          >
-            {MESES_PT.map((m) => (
-              <MenuItem key={m} value={m}>
-                {m.charAt(0).toUpperCase() + m.slice(1)}
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <Typography variant="h6" sx={{ flexGrow: 1 }}>
+          Alunos com 3 faltas consecutivas ({linhasFiltradas.length})
+        </Typography>
 
         <TextField
+          select
+          size="small"
+          label="Mês"
+          value={mes}
+          onChange={(e) => setMes(e.target.value as MesStr)}
+          sx={{ minWidth: 160 }}
+        >
+          {MESES_PT.map((m) => (
+            <MenuItem key={m} value={m}>
+              {m.charAt(0).toUpperCase() + m.slice(1)}
+            </MenuItem>
+          ))}
+        </TextField>
+
+        <FormControlLabel
+          control={
+            <Switch
+              checked={ignoreFuture}
+              onChange={(e) => setIgnoreFuture(e.target.checked)}
+              color="primary"
+            />
+          }
+          label="Ignorar dias futuros"
+        />
+
+        <TextField
+          size="small"
           label="Pesquisar (aluno, modalidade, turma, categoria ou núcleo)"
-          value={busca}
-          onChange={(e) => setBusca(e.target.value)}
-          fullWidth
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          sx={{ flex: 1, minWidth: 260 }}
           InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon fontSize="small" />
+            endAdornment: (
+              <InputAdornment position="end">
+                <SearchIcon />
               </InputAdornment>
             ),
           }}
         />
+      </Box>
 
-        <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap' }}>
-          <Chip color="error" label={`Encontrados: ${linhas.length}`} />
-          <Chip color="primary" variant="outlined" label={`Exibindo: ${linhasFiltradas.length}`} />
-          <Chip size="small" label="Ignora dias futuros" variant="outlined" />
-        </Stack>
-      </Stack>
-
-      <Divider sx={{ mb: 2 }} />
-
-      {linhasFiltradas.length === 0 ? (
-        <Typography>Nenhum aluno com 3+ faltas consecutivas no mês selecionado.</Typography>
+      {loading ? (
+        <Typography>Carregando...</Typography>
+      ) : linhasFiltradas.length === 0 ? (
+        <Typography sx={{ color: 'text.secondary' }}>
+          Nenhum aluno com 3+ faltas consecutivas no mês selecionado.
+        </Typography>
       ) : (
-        <Table size="small" stickyHeader>
-          <TableHead>
-            <TableRow>
-              <TableCell>Aluno</TableCell>
-             
-              <TableCell>Turma</TableCell>
-              <TableCell>Categoria</TableCell>
-              <TableCell>Núcleo</TableCell>
-              <TableCell align="center">Datas das 3 últimas faltas</TableCell>
-              <TableCell align="center">Faltas seguidas</TableCell>
-             
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {linhasFiltradas.map((l) => {
-              const link = waLink(l.telefone);
-              return (
-                <TableRow key={l.id}>
-                  <TableCell>{l.alunoNome}</TableCell>
-                 
-                  <TableCell>{l.turmaNome}</TableCell>
-                  <TableCell>{l.categoria}</TableCell>
-                  <TableCell>{l.nucleo}</TableCell>
-                  <TableCell align="center">
-                    <Stack direction="row" spacing={1} justifyContent="center" sx={{ flexWrap: 'wrap' }}>
-                      {l.datasSequencia.map((d, idx) => (
-                        <Chip key={`${d}-${idx}`} label={d} size="small" />
-                      ))}
-                    </Stack>
-                  </TableCell>
-                  <TableCell align="center">
-                    <Chip color="error" label={l.faltasSeguidas} size="small" />
-                  </TableCell>
-                 
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+        <TableContainer
+          sx={{
+            width: '100%',
+            overflowX: 'auto', // scroll horizontal interno quando necessário
+          }}
+        >
+          <Table
+            size="small"
+            stickyHeader
+            sx={{
+              tableLayout: 'fixed', // respeita larguras abaixo
+              minWidth: 1000,
+            }}
+          >
+            <TableHead>
+              <TableRow>
+                <TableCell sx={{ width: COLS.aluno }}>Aluno</TableCell>
+                <TableCell sx={{ width: COLS.modalidade }}>Modalidade</TableCell>
+                <TableCell sx={{ width: COLS.turma }}>Turma</TableCell>
+                <TableCell sx={{ width: COLS.categoria }}>Categoria</TableCell>
+                <TableCell sx={{ width: COLS.nucleo, display: { xs: 'none', md: 'table-cell' } }}>
+                  Núcleo
+                </TableCell>
+                <TableCell sx={{ width: COLS.datas }} align="center">
+                  Datas das 3 últimas faltas
+                </TableCell>
+                <TableCell sx={{ width: COLS.faltas }} align="center">
+                  Faltas seguidas
+                </TableCell>
+                <TableCell sx={{ width: COLS.freq }} align="center">
+                  Freq. mês (%)
+                </TableCell>
+                <TableCell sx={{ width: COLS.contato }} align="center">
+                  Contato
+                </TableCell>
+                <TableCell sx={{ width: COLS.aviso }} align="center">
+                  Aviso
+                </TableCell>
+              </TableRow>
+            </TableHead>
+
+            <TableBody>
+              {linhasFiltradas.map((l) => {
+                const wa = cleanPhoneToWa(l.telefone);
+                return (
+                  <TableRow key={l.id}>
+                    <TableCell sx={{ whiteSpace: 'normal', wordBreak: 'break-word', p: 1 }}>
+                      {l.alunoNome}
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: 'normal', wordBreak: 'break-word', p: 1 }}>
+                      {l.modalidade}
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: 'normal', wordBreak: 'break-word', p: 1 }}>
+                      {l.turmaNome}
+                    </TableCell>
+                    <TableCell sx={{ whiteSpace: 'normal', wordBreak: 'break-word', p: 1 }}>
+                      {l.categoria}
+                    </TableCell>
+                    <TableCell
+                      sx={{
+                        whiteSpace: 'normal',
+                        wordBreak: 'break-word',
+                        p: 1,
+                        display: { xs: 'none', md: 'table-cell' },
+                      }}
+                    >
+                      {l.nucleo}
+                    </TableCell>
+
+                    <TableCell align="center" sx={{ p: 1 }}>
+                      <Stack
+                        direction="row"
+                        spacing={0.5}
+                        justifyContent="center"
+                        sx={{ flexWrap: 'wrap' }}
+                      >
+                        {l.datasSequencia.map((d, idx) => (
+                          <Chip key={`${d}-${idx}`} size="small" label={d} />
+                        ))}
+                      </Stack>
+                    </TableCell>
+
+                    <TableCell align="center" sx={{ p: 1 }}>
+                      <Chip color="error" size="small" label={l.faltasSeguidas} />
+                    </TableCell>
+
+                    <TableCell align="center" sx={{ p: 1 }}>
+                      {l.freqMes}
+                    </TableCell>
+
+                    <TableCell align="center" sx={{ p: 1 }}>
+                      {wa ? (
+                        <IconButton
+                          size="small"
+                          component="a"
+                          href={wa}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="WhatsApp"
+                        >
+                          <OpenInNewIcon fontSize="small" />
+                        </IconButton>
+                      ) : (
+                        '-'
+                      )}
+                    </TableCell>
+
+                    <TableCell align="center" sx={{ p: 1 }}>
+                      <AvisoStudents
+                        alunoNome={l.alunoNome}
+                        nomeDaTurma={l.turmaNome}
+                        modalidade={l.modalidade}
+                      />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
     </Paper>
   );
