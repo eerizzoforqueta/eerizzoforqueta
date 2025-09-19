@@ -50,46 +50,42 @@ const COLS = {
   datas: 260,
   faltas: 110,
   freq: 110,
+  treinos: 130,    // <— NOVO
   contato: 90,
   aviso: 90,
 } as const;
 
 type LinhaAviso = {
-  id: string;                 // único por aluno+turma
+  id: string;
   alunoNome: string;
   modalidade: string;
   turmaNome: string;
   categoria: string;
   nucleo: string;
   telefone?: string | number;
-  datasSequencia: string[];   // as 3 datas detectadas
-  faltasSeguidas: number;     // normalmente 3+
-  freqMes: string;            // "54.5" etc
+  datasSequencia: string[];
+  faltasSeguidas: number;
+  freqMes: string;
+  treinosSemana: number; // <— NOVO
 };
 
 function normalizar(t: unknown) {
   return (t ?? '').toString().trim().toLowerCase();
 }
-
 function parseDayNumber(key: string): number {
-  // key no formato "d-m-YYYY"
   const [d] = key.split('-');
   const n = parseInt(d, 10);
   return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
 }
-
 function sortByDayKeyAsc(a: string, b: string) {
   return parseDayNumber(a) - parseDayNumber(b);
 }
-
 function monthNameFromDate(d: Date): MesStr {
   return MESES_PT[d.getMonth()];
 }
-
 function cleanPhoneToWa(n: string | number | undefined): string | null {
   if (!n) return null;
   const onlyDigits = String(n).replace(/\D/g, '');
-  // Brasil: tentar 11 dígitos (DD + 9 + número)
   if (onlyDigits.length < 10) return null;
   return `https://wa.me/55${onlyDigits}`;
 }
@@ -97,7 +93,6 @@ function cleanPhoneToWa(n: string | number | undefined): string | null {
 export default function AvisosFaltasConsecutivas() {
   const { fetchModalidades } = useData();
 
-  // mês padrão = mês atual
   const [mes, setMes] = useState<MesStr>(monthNameFromDate(new Date()));
   const [query, setQuery] = useState('');
   const [ignoreFuture, setIgnoreFuture] = useState(true);
@@ -110,7 +105,6 @@ export default function AvisosFaltasConsecutivas() {
     fetchModalidades()
       .then((mods) => {
         if (!active) return;
-        // filtra “arquivados / excluidos / temporarios”
         const valid = mods.filter(
           (m) =>
             !!m &&
@@ -126,6 +120,29 @@ export default function AvisosFaltasConsecutivas() {
     };
   }, [fetchModalidades]);
 
+  // NOVO: mapa nomeDoAluno -> quantas turmas participa (todas modalidades)
+  const treinosPorAlunoNome = useMemo(() => {
+    const map = new Map<string, number>();
+    modalidades.forEach((mod) => {
+      const turmasArr: Turma[] = Array.isArray(mod.turmas)
+        ? mod.turmas
+        : (Object.values(mod.turmas || {}) as Turma[]);
+      turmasArr.forEach((turma) => {
+        const alunosArr: Aluno[] = Array.isArray(turma.alunos)
+          ? turma.alunos
+          : (Object.values(turma.alunos || {}) as Aluno[]);
+        alunosArr
+          .filter(Boolean)
+          .forEach((aluno) => {
+            if (!aluno?.nome) return;
+            const key = aluno.nome.trim();
+            map.set(key, (map.get(key) || 0) + 1);
+          });
+      });
+    });
+    return map;
+  }, [modalidades]);
+
   const linhas: LinhaAviso[] = useMemo(() => {
     const hoje = new Date();
     const hojeDia = hoje.getDate();
@@ -137,21 +154,21 @@ export default function AvisosFaltasConsecutivas() {
     modalidades.forEach((mod) => {
       const turmasArr: Turma[] = Array.isArray(mod.turmas)
         ? mod.turmas
-        : Object.values(mod.turmas || {}) as Turma[];
+        : (Object.values(mod.turmas || {}) as Turma[]);
 
       turmasArr.forEach((turma) => {
         const alunosArr: Aluno[] = Array.isArray(turma.alunos)
           ? turma.alunos
-          : Object.values(turma.alunos || {}) as Aluno[];
+          : (Object.values(turma.alunos || {}) as Aluno[]);
 
         alunosArr
           .filter(Boolean)
           .forEach((aluno, idx) => {
+            if (!aluno?.nome) return;
+
             const presMes = aluno.presencas?.[mes] || {};
-            // pega as datas (chaves) existentes
             let dayKeys = Object.keys(presMes).sort(sortByDayKeyAsc);
 
-            // opcional: ignorar dias futuros (apenas se o mês for o atual)
             if (ignoreFuture && mes === hojeMes) {
               dayKeys = dayKeys.filter((k) => {
                 const [d, m, y] = k.split('-').map((n) => parseInt(n, 10));
@@ -159,17 +176,14 @@ export default function AvisosFaltasConsecutivas() {
                   return false;
                 if (y > hojeAno) return false;
                 if (y < hojeAno) return true;
-                // mesmo ano
                 if (m > hoje.getMonth() + 1) return false;
                 if (m < hoje.getMonth() + 1) return true;
-                // mesmo mês
                 return d <= hojeDia;
               });
             }
-
             if (dayKeys.length === 0) return;
 
-            // calcula frequência do mês (somente os dias considerados)
+            // frequência do mês
             let presentes = 0;
             let total = 0;
             dayKeys.forEach((k) => {
@@ -181,13 +195,13 @@ export default function AvisosFaltasConsecutivas() {
             });
             const freq = total > 0 ? ((presentes / total) * 100).toFixed(1) : '0.0';
 
-            // encontra a MAIOR sequência de falses consecutivos
+            // maior sequência de faltas seguidas
             let bestRunLen = 0;
             let bestRunEndIdx = -1;
             let curLen = 0;
 
             dayKeys.forEach((k, i) => {
-              const v = !!presMes[k]; // true=presente, false=falta
+              const v = !!presMes[k];
               if (!v) {
                 curLen += 1;
                 if (curLen > bestRunLen) {
@@ -200,17 +214,11 @@ export default function AvisosFaltasConsecutivas() {
             });
 
             if (bestRunLen >= 3) {
-              // pega as 3 últimas datas dessa melhor sequência
               const datasSequencia: string[] = [];
-              for (
-                let i = bestRunEndIdx - 2;
-                i <= bestRunEndIdx;
-                i += 1
-              ) {
+              for (let i = bestRunEndIdx - 2; i <= bestRunEndIdx; i += 1) {
                 const k = dayKeys[i];
                 if (k) datasSequencia.push(k);
               }
-
               out.push({
                 id: `${aluno.nome}-${turma.uuidTurma || turma.nome_da_turma}-${idx}`,
                 alunoNome: aluno.nome,
@@ -222,16 +230,16 @@ export default function AvisosFaltasConsecutivas() {
                 datasSequencia,
                 faltasSeguidas: bestRunLen,
                 freqMes: freq,
+                treinosSemana: treinosPorAlunoNome.get(aluno.nome.trim()) || 1, // <— usa o mapa
               });
             }
           });
       });
     });
 
-    // ordena por nome
     out.sort((a, b) => a.alunoNome.localeCompare(b.alunoNome));
     return out;
-  }, [modalidades, mes, ignoreFuture]);
+  }, [modalidades, mes, ignoreFuture, treinosPorAlunoNome]);
 
   const linhasFiltradas = useMemo(() => {
     const q = normalizar(query);
@@ -311,20 +319,8 @@ export default function AvisosFaltasConsecutivas() {
           Nenhum aluno com 3+ faltas consecutivas no mês selecionado.
         </Typography>
       ) : (
-        <TableContainer
-          sx={{
-            width: '100%',
-            overflowX: 'auto', // scroll horizontal interno quando necessário
-          }}
-        >
-          <Table
-            size="small"
-            stickyHeader
-            sx={{
-              tableLayout: 'fixed', // respeita larguras abaixo
-              minWidth: 1000,
-            }}
-          >
+        <TableContainer sx={{ width: '100%', overflowX: 'auto' }}>
+          <Table size="small" stickyHeader sx={{ tableLayout: 'fixed', minWidth: 1120 }}>
             <TableHead>
               <TableRow>
                 <TableCell sx={{ width: COLS.aluno }}>Aluno</TableCell>
@@ -342,6 +338,9 @@ export default function AvisosFaltasConsecutivas() {
                 </TableCell>
                 <TableCell sx={{ width: COLS.freq }} align="center">
                   Freq. mês (%)
+                </TableCell>
+                <TableCell sx={{ width: COLS.treinos }} align="center">
+                  Treinos/semana {/* NOVO */}
                 </TableCell>
                 <TableCell sx={{ width: COLS.contato }} align="center">
                   Contato
@@ -370,23 +369,13 @@ export default function AvisosFaltasConsecutivas() {
                       {l.categoria}
                     </TableCell>
                     <TableCell
-                      sx={{
-                        whiteSpace: 'normal',
-                        wordBreak: 'break-word',
-                        p: 1,
-                        display: { xs: 'none', md: 'table-cell' },
-                      }}
+                      sx={{ whiteSpace: 'normal', wordBreak: 'break-word', p: 1, display: { xs: 'none', md: 'table-cell' } }}
                     >
                       {l.nucleo}
                     </TableCell>
 
                     <TableCell align="center" sx={{ p: 1 }}>
-                      <Stack
-                        direction="row"
-                        spacing={0.5}
-                        justifyContent="center"
-                        sx={{ flexWrap: 'wrap' }}
-                      >
+                      <Stack direction="row" spacing={0.5} justifyContent="center" sx={{ flexWrap: 'wrap' }}>
                         {l.datasSequencia.map((d, idx) => (
                           <Chip key={`${d}-${idx}`} size="small" label={d} />
                         ))}
@@ -399,6 +388,10 @@ export default function AvisosFaltasConsecutivas() {
 
                     <TableCell align="center" sx={{ p: 1 }}>
                       {l.freqMes}
+                    </TableCell>
+
+                    <TableCell align="center" sx={{ p: 1 }}>
+                      <Chip size="small" label={l.treinosSemana} />
                     </TableCell>
 
                     <TableCell align="center" sx={{ p: 1 }}>
