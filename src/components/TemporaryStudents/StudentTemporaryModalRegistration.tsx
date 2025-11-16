@@ -101,7 +101,7 @@ export default function TemporaryStudentRegistration({
       await sendDataToApi([data]); // Enviando os dados do aluno
 
       // Chamar o endpoint para ajustar os dados da turma
-     CorrigirDadosDefinitivos();
+     //CorrigirDadosDefinitivos();
 
       setSuccessMessage("Aluno temporário adicionado com sucesso.");
       reset(); // Resetando o formulário após o envio

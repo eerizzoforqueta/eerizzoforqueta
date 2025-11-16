@@ -74,7 +74,7 @@ function MoveAllStudents({
         await moveStudentTemp(payload);
 
         // Ajustar dados da turma de origem e destino
-        await CorrigirDadosDefinitivos()
+        //await CorrigirDadosDefinitivos()
 
         reset();
        
