@@ -32,6 +32,7 @@ import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
 import AutoDeleteIcon from '@mui/icons-material/AutoDelete';
 import ChangeCircleIcon from '@mui/icons-material/ChangeCircle';
 import AvisosFaltasConsecutivas from '@/components/AvisosFaltasConsecutivas'
+
 const drawerWidth = 280
 export default function AdminPage() {
   const [mobileOpen, setMobileOpen] = React.useState(false)
@@ -56,59 +57,68 @@ export default function AdminPage() {
 const drawer = (
   <Box sx={{ width: drawerWidth, flexShrink: 0, bgcolor: '#f4f4f4' }}>
     <Toolbar />
-    <Box sx={{pb:"2.3rem"}}>
-    <Avatar sx={{ 
+    <Box sx={{ pb: '2.3rem' }}>
+      <Avatar
+        sx={{
           height: 80,
           position: 'absolute',
           top: '10px',
           left: '80px',
           width: '50%',
-          backgroundColor:'#f4f4f4',
-         
-          }}>
-      <Image
-                 src="https://firebasestorage.googleapis.com/v0/b/imagens-9116b.appspot.com/o/logoescolinha-removebg-preview(1).png?alt=media&token=c33b14a0-c768-45a1-926f-94b85770f27b"
-
-        alt="Logo"
-        layout="fill"
-        objectFit="contain"
-      />
-    </Avatar>
+          backgroundColor: '#f4f4f4',
+        }}
+      >
+        <Image
+          src="https://firebasestorage.googleapis.com/v0/b/imagens-9116b.appspot.com/o/logoescolinha-removebg-preview(1).png?alt=media&token=c33b14a0-c768-45a1-926f-94b85770f27b"
+          alt="Logo"
+          layout="fill"
+          objectFit="contain"
+        />
+      </Avatar>
     </Box>
     <Divider />
     <List sx={{ padding: 0 }}>
       {[
-        { icon: <HomeIcon color="primary" />, text: "Página Inicial", href: "/" },
-        { icon: <GroupAddIcon color="secondary" />, text: "Cadastrar alunos", href: "/StudentRegistration" },
-        { icon: <SettingsIcon color="error" />, text: "Trocar aluno de turma", href: "/StudentUpdateTurmas" },
-        { icon: <ListAltIcon color="action" />, text: "Listas de chamada", href: "/StudentPresenceTable" },
-        { icon: <UpdateIcon color="disabled" />, text: "Atualização cadastral", href: "/StudentUpdatePersonalInformation" },
-        { icon: <AssignmentIndIcon color="info" />, text: "Lista geral de alunos", href: "/ListOfAllStudents" },
-        { icon: <FileDownloadIcon color="success" />, text: "Controle de uniformes", href: "/StudantUniformTable" },
-        { icon: <ErrorOutlineIcon color="warning" />, text: "Verificação e correção", href: "/AjusteDadosTurmas" },
-        { icon: <AutoDeleteIcon color="error" />, text: "Arquivar/Deletar alunos", href: "/ArquivarAlunos" },
-        { icon: <ChangeCircleIcon color="warning" />, text: "Trocar Semestre", href: "/MudarSemestre" },
-        { icon: <FileDownloadIcon color="success" />, text: "Criação/Atualização de turmas", href: "/HandleTurmas" },
+        { icon: <HomeIcon color="primary" />, text: 'Página Inicial', href: '/' },
+        { icon: <GroupAddIcon color="secondary" />, text: 'Cadastrar alunos', href: '/StudentRegistration' },
+         { icon: <GroupAddIcon color="success" />, text: 'Painel de Controle de rematriculas', href: '/rematricula/rematriculasAdmControl' },
+        { icon: <AssignmentIndIcon color="info" />, text: 'Portal da rematricula', href: '/rematricula/PortalDaRematricula ' },
+        { icon: <SettingsIcon color="error" />, text: 'Trocar aluno de turma', href: '/StudentUpdateTurmas' },
+        { icon: <ListAltIcon color="action" />, text: 'Listas de chamada', href: '/StudentPresenceTable' },
+        { icon: <UpdateIcon color="disabled" />, text: 'Atualização cadastral', href: '/StudentUpdatePersonalInformation' },
+        { icon: <AssignmentIndIcon color="info" />, text: 'Lista geral de alunos', href: '/ListOfAllStudents' },
+        { icon: <FileDownloadIcon color="success" />, text: 'Controle de uniformes', href: '/StudantUniformTable' },
+        { icon: <ErrorOutlineIcon color="warning" />, text: 'Verificação e correção', href: '/AjusteDadosTurmas' },
+        { icon: <AutoDeleteIcon color="error" />, text: 'Arquivar/Deletar alunos', href: '/ArquivarAlunos' },
+        { icon: <ChangeCircleIcon color="warning" />, text: 'Trocar Semestre', href: '/MudarSemestre' },
+        { icon: <FileDownloadIcon color="success" />, text: 'Criação/Atualização de turmas', href: '/HandleTurmas' },
       ].map((item, index) => (
         <React.Fragment key={index}>
           <ListItem disablePadding sx={{ '&:hover': { bgcolor: '#e0e0e0' } }}>
-            <ListItemButton>
+            {/* 👇 aqui o segredo: ListItemButton vira Link */}
+            <ListItemButton
+              component={Link}
+              href={item.href}
+              sx={{ textDecoration: 'none', color: 'inherit' }}
+            >
               <ListItemIcon>{item.icon}</ListItemIcon>
-              <ListItemText primary={
-                <Link href={item.href} style={{ textDecoration: 'none', color: 'inherit', fontSize: '1.1rem' }}>
-                  <Typography>{item.text}</Typography>
-                </Link>
-              } />
+              <ListItemText
+                primary={
+                  <Typography sx={{ fontSize: '1.1rem' }}>
+                    {item.text}
+                  </Typography>
+                }
+              />
             </ListItemButton>
           </ListItem>
-          
+
           {index < 9 && <Divider variant="inset" component="li" />}
         </React.Fragment>
       ))}
-      
     </List>
   </Box>
 );
+
   // Remove this const when copying and pasting into your project.
   // StudentTemporary
   return (
