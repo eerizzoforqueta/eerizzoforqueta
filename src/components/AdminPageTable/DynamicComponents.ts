@@ -1,4 +1,4 @@
-// Em algum arquivo de componente, por exemplo, DynamicComponents.js
+// DynamicComponents.ts
 
 import dynamic from 'next/dynamic';
 
