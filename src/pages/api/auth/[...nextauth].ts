@@ -15,7 +15,7 @@ export const authOptions = {
           // Implementar a lógica de autenticação aqui
           if (
             (credentials!.username === "admin" && credentials!.password === "adminpass") ||
-            (credentials!.username === "professor" && credentials!.password === "professor2025")
+            (credentials!.username === "professor" && credentials!.password === "rizzosports#")
           ) {
             return {
               id: credentials!.username,
