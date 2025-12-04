@@ -20,21 +20,46 @@ export const BoxStyleCadastro = {
 
   export const BoxStyleRematricula = {
     backgroundColor: "#ffffff",
-    border: "10px solid",
-    borderImageSlice: "1",
-    borderWidth: "9px",
-    borderImageSource: "linear-gradient(to left, #FDA188, #FDA188)",
-    borderRadius: "3px",
-    boxShadow: "0 9px 40px rgba(42, 42, 42)",
-    fontSize: "16px",
-    
-    width: "100%",
-    display: "flex",
-    flexDirection: "column",
-    margin: "30px auto",
-    padding: "2.5em",
+  // Nota: borderImage muitas vezes anula o borderRadius em CSS.
+  // Se quiser cantos arredondados reais, considere usar border normal com cor sólida ou um wrapper.
+  border: "10px solid", 
+  borderImageSlice: "1",
+  borderWidth: "9px",
+  borderImageSource: "linear-gradient(to left, #FDA188, #FDA188)", 
+  borderRadius: "3px", // Pode não funcionar devido ao borderImage
+  boxShadow: "0 9px 40px rgba(42, 42, 42, 0.1)", // Ajustei a opacidade para ficar mais leve
+  fontSize: "16px",
+  width: "100%",
+  display: "flex",
+  flexDirection: "column",
+  margin: "30px auto",
+  padding: "2.5em",
   };
 
+// --- NOVOS ESTILOS PARA A TABELA DE REMATRICULA ---
+export const tableHeaderStyle = {
+  backgroundColor: '#f8f9fa', // Cinza muito suave para o cabeçalho
+  fontWeight: 700,
+  color: '#2c3e50',
+  textTransform: 'uppercase',
+  fontSize: '0.75rem',
+  letterSpacing: '0.05em',
+  borderBottom: '2px solid #eef2f6'
+};
+
+export const tableRowHoverStyle = {
+  '&:hover': {
+    backgroundColor: '#fff8f6 !important', // Um tom muito sutil de laranja ao passar o mouse, combinando com sua borda
+  },
+  // Adiciona mais espaço vertical entre as linhas
+  '& td': {
+    paddingTop: '16px',
+    paddingBottom: '16px',
+    fontSize: '0.9rem',
+    color: '#555',
+  }
+};
+//--------------------------------------------------------------------------------------------
   export const BoxStyleTurmaInfoTable = {
     backgroundColor: "#ffffff",
     border: "10px solid",

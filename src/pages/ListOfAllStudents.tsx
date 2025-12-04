@@ -154,34 +154,104 @@ export default function StudantTableGeral() {
 
     // Preparação das linhas da tabela
     const rows: GridRowsProp = alunosComTurma.map(
-        ({ aluno, nomeDaTurma, categoria, modalidade }) => {
-            return {
-                id: aluno.informacoesAdicionais?.IdentificadorUnico ?? uuidv4(),
-                foto: aluno.foto,
-                nome: aluno.nome,
-                anoNascimento: aluno.anoNascimento,
-                dataMatricula: aluno.dataMatricula == undefined ? "-" : normalizeText(String(aluno.dataMatricula)),
-                rg: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.rg) : "-",
-                uniforme: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.uniforme) : "-",
-                telefoneComWhatsapp: aluno.telefoneComWhatsapp == undefined ? "-" : normalizeText(String(aluno.telefoneComWhatsapp)),
-                modalidade_turma: `${modalidade}_${nomeDaTurma}`, // Campo combinado
-                turma: nomeDaTurma, // Mantém para uso interno
-                modalidade: modalidade, // Mantém para uso interno
-                irmaos: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.irmaos) : "-",
-                nomefuncionarioJBS: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.nomefuncionarioJBS) : "-",
-                nomefuncionariomarcopolo: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.nomefuncionariomarcopolo) : "-",
-                endereco: aluno.informacoesAdicionais && aluno.informacoesAdicionais.endereco ? normalizeText(aluno.informacoesAdicionais.endereco.ruaAvenida) : "-",
-                bairro: aluno.informacoesAdicionais && aluno.informacoesAdicionais.endereco?.bairro ? normalizeText(aluno.informacoesAdicionais.endereco?.bairro) : "-",
-                numerocasa: aluno.informacoesAdicionais && aluno.informacoesAdicionais.endereco?.numeroResidencia ? normalizeText(aluno.informacoesAdicionais.endereco?.numeroResidencia) : "-",
-                cep: aluno.informacoesAdicionais && aluno.informacoesAdicionais.endereco?.cep ? normalizeText(aluno.informacoesAdicionais.endereco?.cep) : "-",
-                pagadorMensalidadesNome: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.pagadorMensalidades?.nomeCompleto) : "-",
-                pagadorMensalidadesCpf: aluno.informacoesAdicionais ? normalizeText(String(aluno.informacoesAdicionais.pagadorMensalidades?.cpf)) : "-",
-                pagadorMensalidadesEmail: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.pagadorMensalidades?.email) : "-",
-                pagadorMensalidadesCelular: aluno.informacoesAdicionais ? normalizeText(String(aluno.informacoesAdicionais.pagadorMensalidades?.celularWhatsapp)) : "-",
-                escolaEstuda: aluno.informacoesAdicionais ? normalizeText(aluno.informacoesAdicionais.escolaEstuda) : "-", //escolaEstuda
-            };
-        }
-    );
+  ({ aluno, nomeDaTurma, categoria, modalidade }) => {
+    const identificadorUnico =
+      aluno.informacoesAdicionais?.IdentificadorUnico ?? uuidv4();
+
+    // id da linha: aluno + modalidade + turma
+    const rowId = `${identificadorUnico}__${modalidade}__${nomeDaTurma}`;
+
+    return {
+      id: rowId,                              // 👈 agora é único por turma
+      identificadorUnico,                    // opcional, se quiser usar em outro lugar
+
+      foto: aluno.foto,
+      nome: aluno.nome,
+      anoNascimento: aluno.anoNascimento,
+      dataMatricula:
+        aluno.dataMatricula == undefined
+          ? '-'
+          : normalizeText(String(aluno.dataMatricula)),
+      rg: aluno.informacoesAdicionais
+        ? normalizeText(aluno.informacoesAdicionais.rg)
+        : '-',
+      uniforme: aluno.informacoesAdicionais
+        ? normalizeText(aluno.informacoesAdicionais.uniforme)
+        : '-',
+      telefoneComWhatsapp:
+        aluno.telefoneComWhatsapp == undefined
+          ? '-'
+          : normalizeText(String(aluno.telefoneComWhatsapp)),
+
+      modalidade_turma: `${modalidade}_${nomeDaTurma}`,
+      turma: nomeDaTurma,
+      modalidade: modalidade,
+
+      irmaos: aluno.informacoesAdicionais
+        ? normalizeText(aluno.informacoesAdicionais.irmaos)
+        : '-',
+      nomefuncionarioJBS: aluno.informacoesAdicionais
+        ? normalizeText(aluno.informacoesAdicionais.nomefuncionarioJBS)
+        : '-',
+      nomefuncionariomarcopolo: aluno.informacoesAdicionais
+        ? normalizeText(aluno.informacoesAdicionais.nomefuncionariomarcopolo)
+        : '-',
+      endereco:
+        aluno.informacoesAdicionais &&
+        aluno.informacoesAdicionais.endereco
+          ? normalizeText(
+              aluno.informacoesAdicionais.endereco.ruaAvenida,
+            )
+          : '-',
+      bairro:
+        aluno.informacoesAdicionais &&
+        aluno.informacoesAdicionais.endereco?.bairro
+          ? normalizeText(aluno.informacoesAdicionais.endereco?.bairro)
+          : '-',
+      numerocasa:
+        aluno.informacoesAdicionais &&
+        aluno.informacoesAdicionais.endereco?.numeroResidencia
+          ? normalizeText(
+              aluno.informacoesAdicionais.endereco?.numeroResidencia,
+            )
+          : '-',
+      cep:
+        aluno.informacoesAdicionais &&
+        aluno.informacoesAdicionais.endereco?.cep
+          ? normalizeText(aluno.informacoesAdicionais.endereco?.cep)
+          : '-',
+      pagadorMensalidadesNome: aluno.informacoesAdicionais
+        ? normalizeText(
+            aluno.informacoesAdicionais.pagadorMensalidades?.nomeCompleto,
+          )
+        : '-',
+      pagadorMensalidadesCpf: aluno.informacoesAdicionais
+        ? normalizeText(
+            String(
+              aluno.informacoesAdicionais.pagadorMensalidades?.cpf,
+            ),
+          )
+        : '-',
+      pagadorMensalidadesEmail: aluno.informacoesAdicionais
+        ? normalizeText(
+            aluno.informacoesAdicionais.pagadorMensalidades?.email,
+          )
+        : '-',
+      pagadorMensalidadesCelular: aluno.informacoesAdicionais
+        ? normalizeText(
+            String(
+              aluno.informacoesAdicionais.pagadorMensalidades
+                ?.celularWhatsapp,
+            ),
+          )
+        : '-',
+      escolaEstuda: aluno.informacoesAdicionais
+        ? normalizeText(aluno.informacoesAdicionais.escolaEstuda)
+        : '-',
+    };
+  },
+);
+
 
     const mergedRows = rows.map(row => ({
         ...row,

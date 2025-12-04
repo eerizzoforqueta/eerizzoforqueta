@@ -14,8 +14,16 @@ import {
   Alert,
   Checkbox,
   TextField,
+  Chip,
+  TableContainer,
 } from '@mui/material';
-import { BoxStyleRematricula } from '@/utils/Styles';
+import { BoxStyleRematricula, tableHeaderStyle, tableRowHoverStyle } from '@/utils/Styles';
+import {v4 as uuidv4} from 'uuid';
+interface ExtraDestino {
+  modalidadeDestino?: string;
+  turmaDestino?: string;
+  id?:string
+}
 
 interface RematriculaRegistro {
   id: string;
@@ -29,7 +37,9 @@ interface RematriculaRegistro {
   anoLetivo: number;
   timestamp: number;
   status: string;
+  turmasExtrasDestino?: ExtraDestino[];
 }
+
 
 const anoLetivoPadrao = 2026;
 
@@ -46,28 +56,43 @@ const AdminRematriculas2026Page: React.FC = () => {
   const [aplicando, setAplicando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+
+
   const [selecionados, setSelecionados] = useState<string[]>([]);
   const [buscaNome, setBuscaNome] = useState<string>(''); // 🔍 novo estado
 
-  const carregarRematriculas = async () => {
-    setErro(null);
-    setInfo(null);
-    setCarregando(true);
-    try {
-      const res = await fetch(`/api/rematricula/list?anoLetivo=${anoLetivoPadrao}`);
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Erro ao carregar rematrículas.');
-      }
-      setRematriculas(data as RematriculaRegistro[]);
-      setSelecionados([]);
-    } catch (error: any) {
-      console.error(error);
-      setErro(error.message || 'Erro ao carregar rematrículas.');
-    } finally {
-      setCarregando(false);
+const carregarRematriculas = async () => {
+  setErro(null);
+  setInfo(null);
+  setCarregando(true);
+  try {
+    const res = await fetch(`/api/rematricula/list?anoLetivo=${anoLetivoPadrao}`);
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Erro ao carregar rematrículas.');
     }
-  };
+
+    // --- CORREÇÃO AQUI ---
+    // Vamos percorrer os dados e adicionar ID onde faltar
+    const dadosTratados = (data as RematriculaRegistro[]).map((registro) => ({
+      ...registro,
+      // Se houver turmas extras, percorre elas
+      turmasExtrasDestino: registro.turmasExtrasDestino?.map((extra) => ({
+        ...extra,
+        // Usa o ID que veio do banco OU gera um novo fixo agora
+        id: extra.id || crypto.randomUUID() 
+      }))
+    }));
+
+    setRematriculas(dadosTratados); // Salva os dados já com IDs
+    setSelecionados([]);
+  } catch (error: any) {
+    console.error(error);
+    setErro(error.message || 'Erro ao carregar rematrículas.');
+  } finally {
+    setCarregando(false);
+  }
+};
 
   useEffect(() => {
     void carregarRematriculas();
@@ -178,54 +203,84 @@ const AdminRematriculas2026Page: React.FC = () => {
     }
   };
 
+  // Função auxiliar para renderizar o Chip de Resposta
+ const renderRespostaChip = (resposta: string) => {
+    const isSim = resposta.toLowerCase() === 'sim';
+    return (
+      <Chip 
+        label={isSim ? "Sim" : "Não"} 
+        color={isSim ? "success" : "error"} 
+        variant={isSim ? "filled" : "outlined"}
+        size="small"
+        sx={{ fontWeight: 'bold', minWidth: 60 }}
+      />
+    );
+  };
+
+  const renderStatusChip = (status: string) => {
+    let color: 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' = 'default';
+    
+    if (status === 'pendente') color = 'warning';
+    if (status === 'concluido' || status === 'aprovado') color = 'success';
+    
+    return (
+      <Chip 
+        label={status} 
+        color={color} 
+        size="small" 
+        sx={{ textTransform: 'capitalize' }}
+      />
+    );
+  };
+
+  
   return (
     <Box sx={BoxStyleRematricula}>
-      <Typography variant="h5" sx={{ fontWeight: 'bold', mb: 2,color:"black" }}>
+      <Typography variant="h5" sx={{ fontWeight: '800', mb: 1, color: "#333" }}>
         Rematrículas {anoLetivoPadrao}
       </Typography>
 
-
-      <Typography sx={{ mb: 2, color:"black" }}>
+      <Typography sx={{ mb: 4, color: "#666", lineHeight: 1.6 }}>
         Aqui você vê todas as respostas de rematrícula. Você pode filtrar pelo nome do
         aluno, aplicar as rematrículas de quem respondeu <b>"sim"</b> e ainda excluir
         da base quem respondeu <b>"não"</b>.
       </Typography>
 
+      {/* --- BARRA DE AÇÕES --- */}
       <Box
         sx={{
           display: 'flex',
           gap: 2,
-          mb: 2,
+          mb: 4,
           alignItems: 'center',
           flexWrap: 'wrap',
+          backgroundColor: '#f9fafb', // Fundo sutil na área de ações
+          padding: 2,
+          borderRadius: 2,
         }}
       >
-        <Button
-          variant="outlined"
-          onClick={carregarRematriculas}
-          disabled={carregando || aplicando}
-        >
-          Recarregar lista
+        <Button variant="outlined" onClick={carregarRematriculas} disabled={carregando || aplicando}>
+          Recarregar Lista de rematriculas
         </Button>
 
         <Button
            variant="contained"
-           color="warning"
-          onClick={selecionarTodosPendentesSim}
-          disabled={carregando || aplicando || !rematriculasFiltradas.length}
+           color="info"
+           onClick={selecionarTodosPendentesSim}
+           disabled={carregando || aplicando || !rematriculasFiltradas.length}
+           sx={{ boxShadow: 'none' }}
         >
-          ✅ Selecionar alunos com "staus" pendente 
+           Selecionar Rematriculas Pendentes
         </Button>
 
         <Button
           variant="contained"
-          color="primary"
+          color="success"
           onClick={handleAplicarSelecionados}
           disabled={carregando || aplicando || !selecionados.length}
+          sx={{ boxShadow: 'none' }}
         >
-          {aplicando
-            ? 'Aplicando rematrículas...'
-            : 'Aplicar rematrículas selecionadas'}
+          {aplicando ? 'Rematriculando...' : '✅ Confirmar Rematriculas'}
         </Button>
 
         <Button
@@ -234,85 +289,115 @@ const AdminRematriculas2026Page: React.FC = () => {
           onClick={handleExcluirNao}
           disabled={carregando || aplicando}
         >
-          🗑️ Excluir alunos que selecionaram "Não" para rematricula
+          🗑️ Excluir Alunos que não desejam rematricular-se.
         </Button>
 
         {(carregando || aplicando) && <CircularProgress size={24} />}
 
-        {/* Campo de busca por nome */}
         <TextField
-          label="Buscar aluno pelo nome"
+          label="Buscar aluno"
           variant="outlined"
           size="small"
           value={buscaNome}
           onChange={(e) => setBuscaNome(e.target.value)}
-          sx={{ minWidth: 280, marginLeft: 'auto' }}
+          sx={{ minWidth: 280, marginLeft: 'auto', backgroundColor: 'white' }}
         />
       </Box>
 
-      {erro && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {erro}
-        </Alert>
-      )}
+      {erro && <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{erro}</Alert>}
+      {info && <Alert severity="success" sx={{ mb: 2, borderRadius: 2 }}>{info}</Alert>}
 
-      {info && (
-        <Alert severity="success" sx={{ mb: 2 }}>
-          {info}
-        </Alert>
-      )}
-
-      <Paper sx={{ mt: 2 }}>
-        <Table size="small">
+      {/* --- TABELA MODERNA --- */}
+      <TableContainer 
+        component={Paper} 
+        elevation={0} 
+        sx={{ 
+          mt: 2, 
+          border: '1px solid #e0e0e0', 
+          borderRadius: 2,
+          overflow: 'hidden' // Garante que as bordas arredondadas cortem o conteúdo
+        }}
+      >
+        <Table sx={{ minWidth: 650 }}> {/* Removemos size="small" para dar espaco */}
           <TableHead>
-            <TableRow>
-              <TableCell padding="checkbox"></TableCell>
-              <TableCell>Aluno</TableCell>
-              <TableCell>Identificador único</TableCell>
-              <TableCell>Modalidade origem</TableCell>
-              <TableCell>Turma origem</TableCell>
-              <TableCell>Modalidade destino</TableCell>
-              <TableCell>Turma destino</TableCell>
-              <TableCell>Resposta</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Data/Hora</TableCell>
-            </TableRow>
-          </TableHead>
+              <TableRow>
+                <TableCell padding="checkbox" sx={tableHeaderStyle}></TableCell>
+                
+                <TableCell sx={tableHeaderStyle}>Nome do Aluno</TableCell>
+                <TableCell sx={tableHeaderStyle}>Modalidade e Turma de Origem</TableCell>
+                <TableCell sx={tableHeaderStyle}>Modalidade e Turma de Destino</TableCell>
+                <TableCell sx={tableHeaderStyle}>Horários Extras</TableCell>
+                <TableCell sx={tableHeaderStyle} align="center">Deseja Rematricular-se?</TableCell>
+                <TableCell sx={tableHeaderStyle} align="center">Status da Rematricula</TableCell>
+                <TableCell sx={tableHeaderStyle} align="right">Data da Rematricula</TableCell>
+              </TableRow>
+            </TableHead>
+
 
           <TableBody>
             {rematriculasFiltradas.map((r) => {
-              const podeSelecionar =
-                r.resposta === 'sim' && r.status === 'pendente';
+              const podeSelecionar = r.resposta === 'sim' && r.status === 'pendente';
               const selecionado = selecionados.includes(r.id);
               const data = new Date(r.timestamp || 0);
-              const dataStr = isNaN(data.getTime())
-                ? '-'
-                : data.toLocaleString('pt-BR');
+              const dataStr = isNaN(data.getTime()) ? '-' : data.toLocaleDateString('pt-BR'); // Simplifiquei para data curta
+              
+              // Formatação combinada para economizar colunas e melhorar leitura
+              const origemStr = `${r.modalidadeOrigem} - ${r.nomeDaTurmaOrigem}`;
+              const destinoStr = `${r.modalidadeDestino || r.modalidadeOrigem} - ${r.turmaDestino || '-'}`;
 
               return (
-                <TableRow key={r.id} hover>
+                <TableRow 
+                  key={r.id} 
+                  hover 
+                  selected={selecionado}
+                  sx={tableRowHoverStyle}
+                >
                   <TableCell padding="checkbox">
                     <Checkbox
+                      color="primary"
                       disabled={!podeSelecionar || aplicando}
                       checked={selecionado}
                       onChange={() => toggleSelecionado(r.id)}
                     />
                   </TableCell>
-                  <TableCell>{r.alunoNome || '-'}</TableCell>
-                  <TableCell>{r.identificadorUnico}</TableCell>
-                  <TableCell>{r.modalidadeOrigem}</TableCell>
-                  <TableCell>{r.nomeDaTurmaOrigem}</TableCell>
-                  <TableCell>{r.modalidadeDestino || r.modalidadeOrigem}</TableCell>
-                  <TableCell>{r.turmaDestino || '-'}</TableCell>
-                  <TableCell>{r.resposta}</TableCell>
-                  <TableCell>{r.status}</TableCell>
-                  <TableCell>{dataStr}</TableCell>
+                  
+                   
+                  <TableCell sx={{ fontWeight: 500, color: '#000' }}>
+                    {r.alunoNome || '-'}
+                  </TableCell>
+                  
+                  {/* Agrupamos Modalidade e Turma para limpar visualmente */}
+                  <TableCell>{origemStr}</TableCell>
+                  <TableCell>{destinoStr}</TableCell>
+
+                  <TableCell>
+                    {r.turmasExtrasDestino && r.turmasExtrasDestino.length > 0
+                      ? r.turmasExtrasDestino.map((e) => (
+                          <div key={e.id} style={{ fontSize: '0.8rem', color: '#666' }}>
+                            • {e.modalidadeDestino} {e.turmaDestino}
+                          </div>
+                        ))
+                      : <Typography variant="caption" color="text.disabled">-</Typography>}
+                  </TableCell>
+
+                  <TableCell align="center">
+                    {renderRespostaChip(r.resposta)}
+                  </TableCell>
+                  
+                  <TableCell align="center">
+                    {renderStatusChip(r.status)}
+                  </TableCell>
+                  
+                  <TableCell align="right" sx={{ color: '#999' }}>
+                    {dataStr}
+                  </TableCell>
+
                 </TableRow>
               );
             })}
           </TableBody>
         </Table>
-      </Paper>
+      </TableContainer>
     </Box>
   );
 };

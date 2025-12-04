@@ -1,581 +1,849 @@
-// pages/rematricula/[token].tsx
-import { GetServerSideProps, NextPage } from 'next';
-import { useMemo, useState } from 'react';
+// src/pages/rematricula/[token].tsx
+import React, { useState, ChangeEvent, FormEvent, useMemo } from 'react';
+import { GetServerSideProps } from 'next';
+import { useRouter } from 'next/router';
 import admin from '@/config/firebaseAdmin';
 import {
-  validarTokenRematricula,
-  RematriculaTokenPayload,
-} from '@/utils/rematriculaToken';
-import {
-  Container,
-  Typography,
   Box,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
+  Button,
+  Typography,
   RadioGroup,
   FormControlLabel,
   Radio,
-  Button,
-  FormHelperText,
+  TextField,
+  Paper,
+  MenuItem,
   CircularProgress,
-  Grid,
-} from '@mui/material'; // <-- Componentes Material UI importados
-import { BoxStyleCadastro } from '@/utils/Styles';
-import { HeaderForm } from '@/components/HeaderDefaultForm';
+  Alert,
+  IconButton,
+} from '@mui/material';
+import DeleteIcon from '@mui/icons-material/Delete';
+import { Modalidade, Turma } from '@/interface/interfaces';
+import jwt from 'jsonwebtoken';
 
-interface DadosContatoResumo {
-  telefoneComWhatsapp?: string;
-  pagadorNomeCompleto?: string;
-  pagadorEmail?: string;
-  pagadorCelularWhatsapp?: string;
+const JWT_SECRET =
+  process.env.REMATRICULA_JWT_SECRET ||
+  process.env.JWT_SECRET ||
+  'rematricula-dev-secret';
+
+const ANO_PADRAO = 2026;
+
+type RespostaTipo = 'sim' | 'nao';
+
+interface ExtraDestinoForm {
+  modalidadeDestino: string;
+  nucleoDestino: string;
+  turmaDestino: string;
 }
 
-interface AlunoResumo {
-  nome: string;
-  anoNascimento: string;
+interface RematriculaRecord {
+  anoLetivo: number;
+  identificadorUnico: string;
   modalidadeOrigem: string;
   nomeDaTurmaOrigem: string;
-  identificadorUnico: string;
-  dadosContato: DadosContatoResumo;
+  resposta?: RespostaTipo | string;
+  status: string;
+  modalidadeDestino?: string | null;
+  turmaDestino?: string | null;
+  dadosAtualizados?: any;
+  turmasExtrasDestino?: ExtraDestinoForm[];
 }
 
-interface TurmaResumo {
-  modalidade: string;
-  nome_da_turma: string;
-  categoria?: string;
-  nucleo?: string;
-  capacidade_maxima?: number;
-  rematriculasConfirmadas: number; // rematrículas 2026 já pedidas pra essa turma
-  temVaga: boolean;                // baseado em capacidade_maxima x rematriculasConfirmadas
+interface AlunoFromDB {
+  nome: string;
+  anoNascimento?: string;
+  telefoneComWhatsapp?: string | number;
+  informacoesAdicionais?: {
+    pagadorMensalidades?: {
+      nomeCompleto?: string;
+      email?: string;
+      celularWhatsapp?: string | number;
+      cpf?: string | number;
+    };
+  };
 }
 
-interface RematriculaPageProps {
-  valido: boolean;
-  erro?: string;
-  aluno?: AlunoResumo;
-  turmasDisponiveis?: TurmaResumo[];
-  token?: string;
-  anoLetivo?: number;
+interface PageProps {
+  token: string;
+  anoLetivo: number;
+  invalid: boolean;
+  rematricula: RematriculaRecord | null;
+  aluno: AlunoFromDB | null;
+  modalidades: Modalidade[]; // { nome, turmas: Turma[] }
 }
 
-const RematriculaPage: NextPage<RematriculaPageProps> = ({
-  valido,
-  erro,
-  aluno,
-  turmasDisponiveis = [],
+const formatCPF = (digits: string) => {
+  const clean = digits.slice(0, 11);
+  const p1 = clean.slice(0, 3);
+  const p2 = clean.slice(3, 6);
+  const p3 = clean.slice(6, 9);
+  const p4 = clean.slice(9, 11);
+
+  let result = p1;
+  if (p2) result += '.' + p2;
+  if (p3) result += '.' + p3;
+  if (p4) result += '-' + p4;
+  return result;
+};
+
+const RematriculaTokenPage: React.FC<PageProps> = ({
   token,
   anoLetivo,
+  invalid,
+  rematricula,
+  aluno,
+  modalidades,
 }) => {
-  const [turmaDestino, setTurmaDestino] = useState('');
-  const [resposta, setResposta] = useState<'sim' | 'nao' | ''>('');
-  const [enviando, setEnviando] = useState(false);
-  const [mensagem, setMensagem] = useState<string | null>(null);
+  const router = useRouter();
 
-  // estados de dados pessoais
-  const [telefone, setTelefone] = useState(
-    aluno?.dadosContato.telefoneComWhatsapp ?? '',
-  );
-  const [pagadorNome, setPagadorNome] = useState(
-    aluno?.dadosContato.pagadorNomeCompleto ?? '',
-  );
-  const [pagadorEmail, setPagadorEmail] = useState(
-    aluno?.dadosContato.pagadorEmail ?? '',
-  );
-  const [pagadorCelular, setPagadorCelular] = useState(
-    aluno?.dadosContato.pagadorCelularWhatsapp ?? '',
-  );
+  const [resposta, setResposta] = useState<RespostaTipo>('sim');
 
-  // ---- DESTINO: MODALIDADE / NÚCLEO / TURMA ----
-
-  // lista de modalidades possíveis (de todas as turmas)
-  const modalidadesLista = useMemo(
-    () =>
-      Array.from(new Set(turmasDisponiveis.map((t) => t.modalidade))).sort(),
-    [turmasDisponiveis],
-  );
-
-  // modalidade de destino começa igual à de origem (but o usuário pode mudar)
+  // principal
   const [modalidadeDestino, setModalidadeDestino] = useState<string>(
-    aluno?.modalidadeOrigem ?? '',
+    rematricula?.modalidadeDestino ||
+      rematricula?.modalidadeOrigem ||
+      '',
+  );
+  const [nucleoDestino, setNucleoDestino] = useState<string>('');
+  const [turmaDestino, setTurmaDestino] = useState<string>(
+    rematricula?.turmaDestino || '',
   );
 
-  // núcleos disponíveis dentro da modalidade de destino
-  const nucleos = useMemo(() => {
-    return Array.from(
-      new Set(
-        turmasDisponiveis
-          .filter((t) => t.modalidade === modalidadeDestino)
-          .map((t) => t.nucleo)
-          .filter((nucleo): nucleo is string => !!nucleo),
+  // extras
+  const [extras, setExtras] = useState<ExtraDestinoForm[]>(
+    rematricula?.turmasExtrasDestino || [],
+  );
+
+  // dados de contato
+  const [telefoneAluno, setTelefoneAluno] = useState<string>(
+    aluno?.telefoneComWhatsapp
+      ? String(aluno.telefoneComWhatsapp)
+      : '',
+  );
+  const [nomePagador, setNomePagador] = useState<string>(
+    aluno?.informacoesAdicionais?.pagadorMensalidades?.nomeCompleto ||
+      '',
+  );
+  const [emailPagador, setEmailPagador] = useState<string>(
+    aluno?.informacoesAdicionais?.pagadorMensalidades?.email || '',
+  );
+  const [telefonePagador, setTelefonePagador] = useState<string>(
+    aluno?.informacoesAdicionais?.pagadorMensalidades
+      ?.celularWhatsapp
+      ? String(
+          aluno.informacoesAdicionais.pagadorMensalidades
+            .celularWhatsapp,
+        )
+      : '',
+  );
+
+  const [cpfPagador, setCpfPagador] = useState<string>(() => {
+    const cpfRaw =
+      aluno?.informacoesAdicionais?.pagadorMensalidades?.cpf;
+    if (!cpfRaw) return '';
+    return formatCPF(String(cpfRaw).replace(/\D/g, ''));
+  });
+
+  const [carregandoSubmit, setCarregandoSubmit] = useState(false);
+  const [erro, setErro] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+
+  const modalidadeAtual = useMemo(
+    () => modalidades.find((m) => m.nome === modalidadeDestino),
+    [modalidades, modalidadeDestino],
+  );
+
+  const nucleosPrincipal = useMemo(() => {
+    if (!modalidadeAtual) return [];
+    const setNucs = new Set<string>();
+    modalidadeAtual.turmas.forEach((t) => {
+      if (t.nucleo) setNucs.add(t.nucleo);
+    });
+    return Array.from(setNucs);
+  }, [modalidadeAtual]);
+
+  const turmasPrincipal = useMemo(() => {
+    if (!modalidadeAtual) return [];
+    return modalidadeAtual.turmas.filter((t) => {
+      if (nucleoDestino && t.nucleo !== nucleoDestino) return false;
+      return true;
+    });
+  }, [modalidadeAtual, nucleoDestino]);
+
+  const handleChangeResposta = (
+    e: ChangeEvent<HTMLInputElement>,
+    value: string,
+  ) => {
+    setResposta(value as RespostaTipo);
+  };
+
+  const handleCpfChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const onlyDigits = e.target.value.replace(/\D/g, '');
+    setCpfPagador(formatCPF(onlyDigits));
+  };
+
+  const handleAddExtra = () => {
+    setExtras((prev) => [
+      ...prev,
+      { modalidadeDestino: '', nucleoDestino: '', turmaDestino: '' },
+    ]);
+  };
+
+  const handleChangeExtra = (
+    index: number,
+    field: keyof ExtraDestinoForm,
+    value: string,
+  ) => {
+    setExtras((prev) =>
+      prev.map((e, i) =>
+        i === index
+          ? {
+              ...e,
+              [field]: value,
+              // se trocou modalidade, zera nucleo/turma para forçar escolha
+              ...(field === 'modalidadeDestino'
+                ? { nucleoDestino: '', turmaDestino: '' }
+                : field === 'nucleoDestino'
+                ? { turmaDestino: '' }
+                : {}),
+            }
+          : e,
       ),
     );
-  }, [turmasDisponiveis, modalidadeDestino]);
+  };
 
-  // núcleo padrão: o núcleo da turma atual, se ainda estiver na mesma modalidade
-  const nucleoPadrao = useMemo(() => {
-    const atual = turmasDisponiveis.find(
-      (t) =>
-        t.modalidade === (aluno?.modalidadeOrigem ?? '') &&
-        t.nome_da_turma === aluno?.nomeDaTurmaOrigem,
-    );
-    return (atual && atual.nucleo) || '';
-  }, [turmasDisponiveis, aluno?.modalidadeOrigem, aluno?.nomeDaTurmaOrigem]);
+  const handleRemoveExtra = (index: number) => {
+    setExtras((prev) => prev.filter((_, i) => i !== index));
+  };
 
-  const [nucleoSelecionado, setNucleoSelecionado] = useState<string>(nucleoPadrao);
+  const getNucleosForExtra = (modalidadeNome: string) => {
+    const mod = modalidades.find((m) => m.nome === modalidadeNome);
+    if (!mod) return [];
+    const setNucs = new Set<string>();
+    mod.turmas.forEach((t) => t.nucleo && setNucs.add(t.nucleo));
+    return Array.from(setNucs);
+  };
 
-  // turmas filtradas por modalidadeDestino + núcleo + regra de vaga
-  const turmasFiltradas = useMemo(() => {
-    return turmasDisponiveis.filter((t) => {
-      if (t.modalidade !== modalidadeDestino) return false;
-      const nucleoOk = !nucleoSelecionado || t.nucleo === nucleoSelecionado;
-
-      // a turma atual do aluno sempre aparece se for a mesma modalidade de origem
-      const isCurrent =
-        t.modalidade === aluno?.modalidadeOrigem &&
-        t.nome_da_turma === aluno?.nomeDaTurmaOrigem;
-
-      const podeEntrar = t.temVaga || isCurrent;
-
-      return nucleoOk && podeEntrar;
+  const getTurmasForExtra = (
+    modalidadeNome: string,
+    nucleo: string,
+  ) => {
+    const mod = modalidades.find((m) => m.nome === modalidadeNome);
+    if (!mod) return [];
+    return mod.turmas.filter((t) => {
+      if (nucleo && t.nucleo !== nucleo) return false;
+      return true;
     });
-  }, [turmasDisponiveis, modalidadeDestino, nucleoSelecionado, aluno]);
+  };
 
-  if (!valido || !aluno || !token || !anoLetivo) {
-    return (
-      <Container maxWidth="sm" sx={{ my: 4 }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          Rematrícula
-        </Typography>
-        <Typography color="error">
-          {erro || 'Link inválido ou expirado.'}
-        </Typography>
-      </Container>
-    );
-  }
-
-   const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    setMensagem(null);
-
-    if (!resposta) {
-      setMensagem('Por favor, informe se deseja ou não a rematrícula.');
-      return;
-    }
+    setErro(null);
+    setInfo(null);
 
     if (resposta === 'sim') {
-      if (!modalidadeDestino) {
-        setMensagem('Selecione a modalidade de destino.');
-        return;
-      }
-      if (!nucleoSelecionado) {
-        setMensagem('Selecione o núcleo de destino.');
-        return;
-      }
-      if (!turmaDestino) {
-        setMensagem('Selecione a turma desejada para a rematrícula.');
+      if (!modalidadeDestino || !turmaDestino) {
+        setErro(
+          'Selecione a modalidade e a turma principal desejada para 2026.',
+        );
         return;
       }
     }
 
     try {
-      setEnviando(true);
-      const res = await fetch('/api/rematricula/submit', {
+      setCarregandoSubmit(true);
+
+      const extrasValidos = extras
+        .filter(
+          (e) => e.modalidadeDestino && e.turmaDestino,
+        )
+        // evita que extra repita a turma principal
+        .filter(
+          (e) =>
+            !(
+              e.modalidadeDestino === modalidadeDestino &&
+              e.turmaDestino === turmaDestino
+            ),
+        );
+
+      const dadosAtualizados = {
+        telefoneAlunoOuResponsavel: telefoneAluno || undefined,
+        nomePagador: nomePagador || undefined,
+        emailPagador: emailPagador || undefined,
+        telefonePagador: telefonePagador || undefined,
+        cpfPagador: cpfPagador.replace(/\D/g, '') || undefined,
+      };
+
+      const body: any = {
+        token,
+        anoLetivo,
+        resposta,
+      };
+
+      if (resposta === 'sim') {
+        body.modalidadeDestino = modalidadeDestino;
+        body.turmaDestino = turmaDestino;
+        body.dadosAtualizados = dadosAtualizados;
+        body.turmasExtrasDestino = extrasValidos.map((e) => ({
+          modalidadeDestino: e.modalidadeDestino,
+          turmaDestino: e.turmaDestino,
+        }));
+      }
+
+      const res = await fetch('/api/rematricula/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token,
-          resposta,
-          modalidadeDestino,
-          turmaDestino,
-          alunoNome: aluno.nome, // 👈 AQUI: mandando o nome do aluno
-          dadosAtualizados: {
-            telefoneComWhatsapp: telefone,
-            pagadorNomeCompleto: pagadorNome,
-            pagadorEmail,
-            pagadorCelularWhatsapp: pagadorCelular,
-          },
-        }),
+        body: JSON.stringify(body),
       });
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Erro ao enviar rematrícula.');
+        throw new Error(data.error || 'Erro ao salvar rematrícula.');
       }
 
-      setMensagem('Formulário enviado com sucesso! Obrigado.');
+      setInfo(
+        resposta === 'sim'
+          ? 'Rematrícula registrada com sucesso! A coordenação irá confirmar e aplicar as mudanças.'
+          : 'Sua opção de NÃO rematricular foi registrada. A coordenação será avisada.',
+      );
+
+      // opcional: redirecionar após alguns segundos
+      // setTimeout(() => router.push('/'), 4000);
     } catch (error: any) {
       console.error(error);
-      setMensagem(error.message || 'Erro ao enviar rematrícula.');
+      setErro(error.message || 'Erro ao enviar rematrícula.');
     } finally {
-      setEnviando(false);
+      setCarregandoSubmit(false);
     }
   };
 
+  if (invalid || !rematricula || !aluno) {
+    return (
+      <Box
+        sx={{
+          minHeight: '100vh',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          background:
+            'linear-gradient(135deg, #4b6cb7 0%, #182848 100%)',
+        }}
+      >
+        <Typography variant="h4" color="white">
+          Link inválido ou expirado.
+        </Typography>
+      </Box>
+    );
+  }
 
   return (
-    <Container maxWidth="sm" sx={{ my: 4 }}>
-      <Box sx={BoxStyleCadastro}>
-         <Box sx={{ display: "table", width: "100%" }}>
-                      <HeaderForm titulo={"Rematricula " + anoLetivo}  />
-                    </Box>
-     
+    <Box
+      sx={{
+        minHeight: '100vh',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'flex-start',
+        background:
+          'linear-gradient(135deg, #4b6cb7 0%, #182848 100%)',
+        padding: 2,
+      }}
+    >
+      <Paper
+        elevation={4}
+        sx={{
+          maxWidth: 800,
+          width: '100%',
+          padding: 3,
+          mt: 4,
+        }}
+      >
+        <Typography
+          variant="h4"
+          sx={{ fontWeight: 'bold', mb: 1, textAlign: 'center' }}
+        >
+          Rematrícula {anoLetivo}
+        </Typography>
 
-      <Box sx={{ mb: 3 }}>
-        <Typography sx={{color:"black"}}>
-          <Typography component="strong" fontWeight="bold" >
-            Aluno:
-          </Typography >{' '}
-          {aluno.nome}
+        <Typography sx={{ mb: 1 }}>
+          <b>Aluno:</b> {aluno.nome}
         </Typography>
-         <Typography sx={{color:"black"}}>
-          <Typography component="strong" fontWeight="bold" >
-            Modalidade atual:
-          </Typography>{' '}
-           {aluno.modalidadeOrigem}
+        <Typography sx={{ mb: 1 }}>
+          <b>Turma atual:</b> {rematricula.nomeDaTurmaOrigem} (
+          {rematricula.modalidadeOrigem})
         </Typography>
+        {aluno.anoNascimento && (
+          <Typography sx={{ mb: 2 }}>
+            <b>Ano de nascimento:</b> {aluno.anoNascimento}
+          </Typography>
+        )}
 
-        <Typography sx={{color:"black"}}>
-          <Typography component="strong" fontWeight="bold" >
-            Turma atual:
-          </Typography>{' '}
-          {aluno.nomeDaTurmaOrigem} 
-        </Typography>
-       
-        <Typography sx={{color:"black"}}>
-          <Typography component="strong" fontWeight="bold" color={"black"}>
-            Ano de nascimento:
-          </Typography>{' '}
-          {aluno.anoNascimento}
-        </Typography>
-      </Box>
+        <Box component="form" onSubmit={handleSubmit} noValidate>
+          <Typography sx={{ mt: 2, mb: 1 }}>
+            Deseja fazer a rematrícula para {anoLetivo}?
+          </Typography>
 
-      {/* Seleção de modalidade de destino */}
-      <Box sx={{ mb: 3 }}>
-        <FormControl fullWidth>
-          <InputLabel id="modalidade-destino-label" sx={{color:"black"}}>
-            Modalidade de destino
-          </InputLabel>
-          <Select
-            labelId="modalidade-destino-label"
-            id="modalidade-destino"
-            value={modalidadeDestino}
-            label="Modalidade de destino"
-            sx={{color:"black"}}
-            onChange={(e) => {
-              setModalidadeDestino(e.target.value as string);
-              setNucleoSelecionado('');
-              setTurmaDestino('');
-            }}
+          <RadioGroup
+            row
+            value={resposta}
+            onChange={handleChangeResposta}
           >
-            <MenuItem value="">-- Selecione --</MenuItem>
-            {modalidadesLista.map((m) => (
-              <MenuItem key={m} value={m}>
-                {m}
-              </MenuItem>
-            ))}
-          </Select>
-          <FormHelperText sx={{color:"black"}}>
-            Você pode manter a mesma modalidade ou escolher outra (por exemplo, trocar
-            futebol por vôlei).
-          </FormHelperText>
-        </FormControl>
-      </Box>
+            <FormControlLabel
+              value="sim"
+              control={<Radio />}
+              label="Sim"
+            />
+            <FormControlLabel
+              value="nao"
+              control={<Radio />}
+              label="Não"
+            />
+          </RadioGroup>
 
-      {/* Seleção de núcleo */}
-      <Box sx={{ mb: 3 }}>
-        <FormControl fullWidth disabled={!modalidadeDestino}>
-          <InputLabel id="nucleo-label">Núcleo</InputLabel>
-          <Select
-            labelId="nucleo-label"
-            id="nucleo"
-            value={nucleoSelecionado}
-            label="Núcleo"
-            onChange={(e) => {
-              setNucleoSelecionado(e.target.value as string);
-              setTurmaDestino('');
-            }}
-          >
-            <MenuItem value="">-- Selecione --</MenuItem>
-            {nucleos.map((nucleo) => (
-              <MenuItem key={nucleo} value={nucleo}>
-                {nucleo}
-              </MenuItem>
-            ))}
-          </Select>
-          <FormHelperText sx={{color:"black"}}>
-            Selecione o núcleo desejado dentro da modalidade escolhida.
-          </FormHelperText>
-        </FormControl>
-      </Box>
+          {resposta === 'sim' && (
+            <>
+              {/* TURMA PRINCIPAL */}
+              <Typography sx={{ mt: 3, mb: 1 }}>
+                <b>Selecione a turma principal desejada para {anoLetivo}:</b>
+              </Typography>
 
-      <Box component="form" onSubmit={handleSubmit} noValidate>
-        {/* 1) Pergunta se deseja rematricular */}
-        <Box sx={{ mb: 3 }}>
-          <FormControl component="fieldset">
-            <Typography component="legend" fontWeight="bold" sx={{color:"black"}}>
-              Deseja fazer a rematrícula para {anoLetivo}?
-            </Typography>
-            <RadioGroup
-              row
-              name="resposta"
-              value={resposta}
-              onChange={(e) =>
-                setResposta(e.target.value as 'sim' | 'nao' | '')
-              }
-            >
-              <FormControlLabel value="sim" sx={{color:"black"}}control={<Radio />} label="Sim" />
-              <FormControlLabel value="nao" sx={{color:"black"}} control={<Radio />} label="Não" />
-            </RadioGroup>
-          </FormControl>
-        </Box>
-
-        {/* 2) Seleção de turma (se SIM) */}
-        {resposta === 'sim' && (
-          <Box sx={{ mb: 3 }}>
-            <FormControl
-              fullWidth
-              disabled={!modalidadeDestino || (!nucleoSelecionado && nucleos.length > 0)}
-            >
-              <InputLabel id="turma-destino-label" sx={{color:"black"}}>
-                Selecione a turma desejada
-              </InputLabel>
-              <Select
-                labelId="turma-destino-label"
-                id="turma-destino"
-                value={turmaDestino}
-                label="Selecione a turma desejada"
-                onChange={(e) => setTurmaDestino(e.target.value as string)}
+              <TextField
+                select
+                fullWidth
+                label="Modalidade"
+                margin="normal"
+                value={modalidadeDestino}
+                onChange={(e) => {
+                  setModalidadeDestino(e.target.value);
+                  setNucleoDestino('');
+                  setTurmaDestino('');
+                }}
               >
-                <MenuItem value="">-- Selecione --</MenuItem>
-                {turmasFiltradas.map((t, idx) => {
-                  const labelExtra: string[] = [];
-                  if (t.categoria) labelExtra.push(t.categoria);
-                  if (t.nucleo) labelExtra.push(t.nucleo);
-                  const descricaoExtra = labelExtra.length
-                    ? ` - ${labelExtra.join(' | ')}`
-                    : '';
+                <MenuItem value="">
+                  <em>Selecione...</em>
+                </MenuItem>
+                {modalidades.map((m) => (
+                  <MenuItem key={m.nome} value={m.nome}>
+                    {m.nome}
+                  </MenuItem>
+                ))}
+              </TextField>
 
-                  const infoVagas =
-                    t.capacidade_maxima && t.capacidade_maxima > 0
-                      ? ` (${t.rematriculasConfirmadas}/${t.capacidade_maxima} rematrículas)`
-                      : '';
+              <TextField
+                select
+                fullWidth
+                label="Núcleo"
+                margin="normal"
+                value={nucleoDestino}
+                onChange={(e) => {
+                  setNucleoDestino(e.target.value);
+                  setTurmaDestino('');
+                }}
+                disabled={!modalidadeDestino}
+              >
+                <MenuItem value="">
+                  <em>Todos</em>
+                </MenuItem>
+                {nucleosPrincipal.map((n) => (
+                  <MenuItem key={n} value={n}>
+                    {n}
+                  </MenuItem>
+                ))}
+              </TextField>
 
+              <TextField
+                select
+                fullWidth
+                label="Turma principal"
+                margin="normal"
+                value={turmaDestino}
+                onChange={(e) => setTurmaDestino(e.target.value)}
+                disabled={!modalidadeDestino}
+              >
+                <MenuItem value="">
+                  <em>Selecione...</em>
+                </MenuItem>
+                {turmasPrincipal.map((t) => {
+                  const vagas =
+                    (t.capacidade_maxima_da_turma || 0) -
+                    (t.capacidade_atual_da_turma || 0);
+                  const lotada = vagas <= 0;
                   return (
-                    <MenuItem key={idx} value={t.nome_da_turma}>
-                      {t.nome_da_turma}
-                      {descricaoExtra}
-                      {infoVagas}
+                    <MenuItem
+                      key={t.nome_da_turma}
+                      value={t.nome_da_turma}
+                      disabled={lotada}
+                    >
+                      {t.nome_da_turma}{' '}
+                      {lotada
+                        ? ' - (Turma cheia)'
+                        : ` - Vagas disponíveis: ${vagas}`}
                     </MenuItem>
                   );
                 })}
-              </Select>
-            </FormControl>
-          </Box>
-        )}
+              </TextField>
 
-        {/* 3) Atualização de dados pessoais */}
-        <Box sx={{ mt: 4, mb: 3 }}>
-          <Typography variant="h5" component="h2" gutterBottom sx={{color:"black"}}>
-            Atualização de dados de contato
-          </Typography>
+              {/* HORÁRIOS EXTRAS */}
+              <Typography sx={{ mt: 3, mb: 1 }}>
+                <b>Horários extras (opcional)</b>
+              </Typography>
+              <Typography sx={{ mb: 1, fontSize: 14 }}>
+                Se o aluno vai treinar mais de uma vez por semana em{' '}
+                {anoLetivo}, você pode adicionar outros horários
+                (modalidade/turma) aqui.
+              </Typography>
 
-          <Grid container spacing={2}>
-            <Grid item xs={12}>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={handleAddExtra}
+                sx={{ mb: 2 }}
+              >
+                Adicionar mais um horário
+              </Button>
+
+              {extras.map((extra, index) => {
+                const nucleosExtra = getNucleosForExtra(
+                  extra.modalidadeDestino,
+                );
+                const turmasExtra = getTurmasForExtra(
+                  extra.modalidadeDestino,
+                  extra.nucleoDestino,
+                );
+
+                return (
+                  <Paper
+                    key={index}
+                    variant="outlined"
+                    sx={{ p: 2, mb: 2 }}
+                  >
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        mb: 1,
+                      }}
+                    >
+                      <Typography>
+                        Horário extra {index + 1}
+                      </Typography>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleRemoveExtra(index)}
+                      >
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+
+                    <TextField
+                      select
+                      fullWidth
+                      label="Modalidade"
+                      margin="normal"
+                      value={extra.modalidadeDestino}
+                      onChange={(e) =>
+                        handleChangeExtra(
+                          index,
+                          'modalidadeDestino',
+                          e.target.value,
+                        )
+                      }
+                    >
+                      <MenuItem value="">
+                        <em>Selecione...</em>
+                      </MenuItem>
+                      {modalidades.map((m) => (
+                        <MenuItem key={m.nome} value={m.nome}>
+                          {m.nome}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+
+                    <TextField
+                      select
+                      fullWidth
+                      label="Núcleo"
+                      margin="normal"
+                      value={extra.nucleoDestino}
+                      onChange={(e) =>
+                        handleChangeExtra(
+                          index,
+                          'nucleoDestino',
+                          e.target.value,
+                        )
+                      }
+                      disabled={!extra.modalidadeDestino}
+                    >
+                      <MenuItem value="">
+                        <em>Todos</em>
+                      </MenuItem>
+                      {nucleosExtra.map((n) => (
+                        <MenuItem key={n} value={n}>
+                          {n}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+
+                    <TextField
+                      select
+                      fullWidth
+                      label="Turma extra"
+                      margin="normal"
+                      value={extra.turmaDestino}
+                      onChange={(e) =>
+                        handleChangeExtra(
+                          index,
+                          'turmaDestino',
+                          e.target.value,
+                        )
+                      }
+                      disabled={!extra.modalidadeDestino}
+                    >
+                      <MenuItem value="">
+                        <em>Selecione...</em>
+                      </MenuItem>
+                      {turmasExtra.map((t) => {
+                        const vagas =
+                          (t.capacidade_maxima_da_turma || 0) -
+                          (t.capacidade_atual_da_turma || 0);
+                        const lotada = vagas <= 0;
+                        return (
+                          <MenuItem
+                            key={t.nome_da_turma}
+                            value={t.nome_da_turma}
+                            disabled={lotada}
+                          >
+                            {t.nome_da_turma}{' '}
+                            {lotada
+                              ? ' - (Turma cheia)'
+                              : ` - Vagas disponíveis: ${vagas}`}
+                          </MenuItem>
+                        );
+                      })}
+                    </TextField>
+                  </Paper>
+                );
+              })}
+
+              {/* DADOS DE CONTATO */}
+              <Typography sx={{ mt: 3, mb: 1 }}>
+                <b>Atualização de dados de contato</b>
+              </Typography>
+
               <TextField
                 fullWidth
+                margin="normal"
                 label="Telefone/WhatsApp do aluno ou responsável"
-                type="tel"
-                sx={{color:"black"}}
-                value={telefone}
-                onChange={(e) => setTelefone(e.target.value)}
+                value={telefoneAluno}
+                onChange={(e) => setTelefoneAluno(e.target.value)}
               />
-            </Grid>
 
-            <Grid item xs={12}>
               <TextField
                 fullWidth
-                label="Nome do Responsável Financeiro"
-                type="text"
-                sx={{color:"black"}}
-                value={pagadorNome}
-                onChange={(e) => setPagadorNome(e.target.value)}
+                margin="normal"
+                label="Nome do pagador das mensalidades"
+                value={nomePagador}
+                onChange={(e) => setNomePagador(e.target.value)}
               />
-            </Grid>
 
-            <Grid item xs={12}>
               <TextField
                 fullWidth
-                label="E-mail do Responsável Financeiro"
-                type="email"
-                sx={{color:"black"}}
-                value={pagadorEmail}
-                onChange={(e) => setPagadorEmail(e.target.value)}
+                margin="normal"
+                label="E-mail do pagador"
+                value={emailPagador}
+                onChange={(e) => setEmailPagador(e.target.value)}
               />
-            </Grid>
 
-            <Grid item xs={12}>
               <TextField
                 fullWidth
-                label="Telefone/WhatsApp do Responsável Financeiro"
-                type="tel"
-                sx={{color:"black"}}
-                value={pagadorCelular}
-                onChange={(e) => setPagadorCelular(e.target.value)}
+                margin="normal"
+                label="Telefone/WhatsApp do pagador"
+                value={telefonePagador}
+                onChange={(e) => setTelefonePagador(e.target.value)}
               />
-            </Grid>
-          </Grid>
 
-          
+              <TextField
+                fullWidth
+                margin="normal"
+                label="CPF do pagador"
+                placeholder="000.000.000-00"
+                value={cpfPagador}
+                onChange={handleCpfChange}
+              />
+            </>
+          )}
+
+          {erro && (
+            <Alert severity="error" sx={{ mt: 2 }}>
+              {erro}
+            </Alert>
+          )}
+
+          {info && (
+            <Alert severity="success" sx={{ mt: 2 }}>
+              {info}
+            </Alert>
+          )}
+
+          <Box sx={{ mt: 3 }}>
+            <Button
+              type="submit"
+              variant="contained"
+              color="primary"
+              disabled={carregandoSubmit}
+              fullWidth
+            >
+              {carregandoSubmit
+                ? 'Enviando rematrícula...'
+                : 'Confirmar rematrícula'}
+            </Button>
+          </Box>
         </Box>
-
-        {/* Botão de envio */}
-        <Button
-          type="submit"
-          variant="contained"
-          color="primary"
-          fullWidth
-          disabled={enviando}
-          sx={{ py: 1.5, mt: 2 }}
-          endIcon={enviando ? <CircularProgress size={20} color="inherit" /> : null}
-        >
-          {enviando ? 'Enviando...' : 'Enviar formulário'}
-        </Button>
-      </Box>
-
-      {/* Mensagem de status */}
-      {mensagem && (
-        <Box sx={{ mt: 3, p: 2, bgcolor: mensagem.includes('sucesso') ? 'success.light' : 'error.light', borderRadius: 1 }}>
-          <Typography color={mensagem.includes('sucesso') ? 'success.dark' : 'error.dark'}>
-            {mensagem}
-          </Typography>
-        </Box>
-      )}
-      </Box>
-    </Container>
+      </Paper>
+    </Box>
   );
 };
 
-export default RematriculaPage;
+export default RematriculaTokenPage;
 
-// -------------------
-// SERVER-SIDE PROPS (CÓDIGO INALTERADO)
-// -------------------
-
-export const getServerSideProps: GetServerSideProps<RematriculaPageProps> = async (
+// ---------------------------------------------
+// getServerSideProps: carrega rematricula, aluno e modalidades
+// ---------------------------------------------
+export const getServerSideProps: GetServerSideProps<PageProps> = async (
   context,
 ) => {
-  const { token } = context.query;
+  const tokenParam = context.params?.token as string | undefined;
 
-  if (!token || typeof token !== 'string') {
+  if (!tokenParam) {
     return {
       props: {
-        valido: false,
-        erro: 'Token de rematrícula ausente.',
+        token: '',
+        anoLetivo: ANO_PADRAO,
+        invalid: true,
+        rematricula: null,
+        aluno: null,
+        modalidades: [],
+      },
+    };
+  }
+
+  // 1) Decodificar/verificar JWT da URL
+  let payload: any;
+  try {
+    payload = jwt.verify(tokenParam, JWT_SECRET) as any;
+  } catch (err) {
+    console.error(
+      'Erro ao verificar token de rematrícula (JWT inválido ou expirado):',
+      err,
+    );
+    return {
+      props: {
+        token: '',
+        anoLetivo: ANO_PADRAO,
+        invalid: true,
+        rematricula: null,
+        aluno: null,
+        modalidades: [],
+      },
+    };
+  }
+
+  const anoLetivo = Number(payload.anoLetivo || ANO_PADRAO);
+  const rematriculaId = String(payload.rematriculaId || '');
+
+  if (!rematriculaId) {
+    console.error(
+      'Payload do token não contém rematriculaId válido:',
+      payload,
+    );
+    return {
+      props: {
+        token: '',
+        anoLetivo,
+        invalid: true,
+        rematricula: null,
+        aluno: null,
+        modalidades: [],
       },
     };
   }
 
   try {
-    const payload: RematriculaTokenPayload = validarTokenRematricula(token);
-    const { identificadorUnico, modalidadeOrigem, nomeDaTurmaOrigem, anoLetivo } =
-      payload;
-
     const db = admin.database();
 
-    // 1) Buscar TODAS as modalidades e turmas
-    const modalidadesRef = db.ref('modalidades');
-    const modalidadesSnap = await modalidadesRef.once('value');
-    const modalidadesVal = modalidadesSnap.val();
+    // 2) Carregar o registro de rematrícula usando rematriculaId (chave segura)
+    const remRef = db.ref(
+      `rematriculas${anoLetivo}/${rematriculaId}`,
+    );
+    const remSnap = await remRef.once('value');
 
-    if (!modalidadesVal) {
+    if (!remSnap.exists()) {
       return {
         props: {
-          valido: false,
-          erro: 'Nenhuma modalidade encontrada.',
+          token: rematriculaId,
+          anoLetivo,
+          invalid: true,
+          rematricula: null,
+          aluno: null,
+          modalidades: [],
         },
       };
     }
 
-    // 2) Buscar rematrículas do ano para calcular ocupação 2026
-    const remRef = db.ref(`rematriculas${anoLetivo}`);
-    const remSnap = await remRef.once('value');
-    const remVal = remSnap.val() || {};
+    const rem = remSnap.val() as RematriculaRecord;
 
-    // Mapa: `${modalidade}|||${turma}` -> contagem
-    const rematriculasPorTurma: Record<string, number> = {};
-    Object.values(remVal as any).forEach((reg: any) => {
-      if (reg && reg.resposta === 'sim' && reg.turmaDestino) {
-        const modDest = reg.modalidadeDestino || reg.modalidadeOrigem;
-        const key = `${modDest}|||${reg.turmaDestino}`;
-        rematriculasPorTurma[key] = (rematriculasPorTurma[key] || 0) + 1;
-      }
-    });
+    // se já foi concluída ou marcada como nao-rematriculado, bloqueia
+    if (rem.status && rem.status !== 'pendente') {
+      return {
+        props: {
+          token: rematriculaId,
+          anoLetivo,
+          invalid: true,
+          rematricula: null,
+          aluno: null,
+          modalidades: [],
+        },
+      };
+    }
 
-    let alunoEncontrado: AlunoResumo | null = null;
-    const turmasDisponiveis: TurmaResumo[] = [];
+    // 3) carregar modalidades completas
+    const modalidadesSnap = await db.ref('modalidades').once('value');
+    const modalidadesVal = modalidadesSnap.val() || {};
 
-    for (const [modNome, modVal] of Object.entries<any>(modalidadesVal)) {
-      const turmasData = modVal.turmas;
-      if (!turmasData) continue;
+    const modalidades: Modalidade[] = Object.entries(
+      modalidadesVal,
+    ).map(([nome, valor]: any) => ({
+      nome,
+      turmas: valor.turmas
+        ? (Array.isArray(valor.turmas)
+            ? valor.turmas
+            : Object.values(valor.turmas)) as Turma[]
+        : [],
+    }));
 
-      const turmasArray: any[] = Array.isArray(turmasData)
-        ? turmasData
-        : Object.values(turmasData);
+    // 4) achar aluno pelo IdentificadorUnico
+    let alunoEncontrado: AlunoFromDB | null = null;
+    const identificadorUnico = rem.identificadorUnico;
 
-      for (const turmaObj of turmasArray) {
-        if (!turmaObj) continue;
-
-        const capacidadeMax = turmaObj.capacidade_maxima_da_turma ?? 0;
-        const key = `${modNome}|||${turmaObj.nome_da_turma}`;
-        const remCount = rematriculasPorTurma[key] ?? 0;
-        const temVaga = capacidadeMax === 0 ? true : remCount < capacidadeMax;
-
-        turmasDisponiveis.push({
-          modalidade: modNome,
-          nome_da_turma: turmaObj.nome_da_turma,
-          categoria: turmaObj.categoria,
-          nucleo: turmaObj.nucleo,
-          capacidade_maxima: capacidadeMax,
-          rematriculasConfirmadas: remCount,
-          temVaga,
-        });
-
-        // procurar o aluno nessa turma
-        const alunosRaw = turmaObj.alunos || [];
-        const alunosArray: any[] = Array.isArray(alunosRaw)
-          ? alunosRaw
-          : Object.values(alunosRaw);
-
-        for (const alunoObj of alunosArray) {
+    outer: for (const modNome of Object.keys(modalidadesVal)) {
+      const mod = modalidadesVal[modNome];
+      const turmasObj = mod.turmas || {};
+      for (const turmaKey of Object.keys(turmasObj)) {
+        const turma = turmasObj[turmaKey];
+        const alunosObj = turma.alunos || {};
+        for (const alunoKey of Object.keys(alunosObj)) {
+          const a = alunosObj[alunoKey];
           if (
-            alunoObj &&
-            alunoObj.informacoesAdicionais &&
-            alunoObj.informacoesAdicionais.IdentificadorUnico === identificadorUnico
+            a?.informacoesAdicionais?.IdentificadorUnico ===
+            identificadorUnico
           ) {
-            const dadosContato: DadosContatoResumo = {
-              telefoneComWhatsapp: alunoObj.telefoneComWhatsapp ?? '',
-              pagadorNomeCompleto:
-                alunoObj.informacoesAdicionais?.pagadorMensalidades?.nomeCompleto ??
-                '',
-              pagadorEmail:
-                alunoObj.informacoesAdicionais?.pagadorMensalidades?.email ?? '',
-              pagadorCelularWhatsapp:
-                alunoObj.informacoesAdicionais?.pagadorMensalidades?.celularWhatsapp ??
-                '',
-            };
-
             alunoEncontrado = {
-              nome: alunoObj.nome,
-              anoNascimento: alunoObj.anoNascimento,
-              modalidadeOrigem,
-              nomeDaTurmaOrigem,
-              identificadorUnico,
-              dadosContato,
+              nome: a.nome,
+              anoNascimento: a.anoNascimento,
+              telefoneComWhatsapp: a.telefoneComWhatsapp,
+              informacoesAdicionais: a.informacoesAdicionais,
             };
-            break;
+            break outer;
           }
         }
       }
@@ -584,27 +852,38 @@ export const getServerSideProps: GetServerSideProps<RematriculaPageProps> = asyn
     if (!alunoEncontrado) {
       return {
         props: {
-          valido: false,
-          erro: 'Aluno não encontrado para este link de rematrícula.',
+          token: rematriculaId,
+          anoLetivo,
+          invalid: true,
+          rematricula: null,
+          aluno: null,
+          modalidades: [],
         },
       };
     }
 
     return {
       props: {
-        valido: true,
-        aluno: alunoEncontrado,
-        turmasDisponiveis,
-        token,
+        // ATENÇÃO: aqui o "token" que o componente recebe é o rematriculaId (chave do DB),
+        // não o JWT da URL. Isso é exatamente o que /api/rematricula/confirm espera.
+        token: rematriculaId,
         anoLetivo,
+        invalid: false,
+        rematricula: rem,
+        aluno: alunoEncontrado,
+        modalidades,
       },
     };
   } catch (error) {
-    console.error('Erro ao validar token ou buscar aluno:', error);
+    console.error('Erro em getServerSideProps [token].tsx:', error);
     return {
       props: {
-        valido: false,
-        erro: 'Link inválido ou expirado.',
+        token: '',
+        anoLetivo,
+        invalid: true,
+        rematricula: null,
+        aluno: null,
+        modalidades: [],
       },
     };
   }
