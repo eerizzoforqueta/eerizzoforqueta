@@ -303,8 +303,8 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
 
       setInfo(
         resposta === 'sim'
-          ? 'Rematrícula registrada com sucesso! A coordenação irá confirmar e aplicar as mudanças.'
-          : 'Sua opção de NÃO rematricular foi registrada. A coordenação será avisada.',
+          ? 'Rematrícula registrada com sucesso! A direção da escola irá confirmar e aplicar as mudanças.'
+          : 'Sua opção de NÃO rematricular foi registrada com sucesso.',
       );
 
       // opcional: redirecionar após alguns segundos
