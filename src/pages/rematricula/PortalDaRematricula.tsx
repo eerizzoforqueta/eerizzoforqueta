@@ -1,24 +1,35 @@
-// src/pages/rematricula/index.tsx
-import React, {
-  useState,
-  ChangeEvent,
-  FormEvent,
-  useCallback,
-} from 'react';
-import { useRouter } from 'next/router';
+// src/pages/rematricula/index.tsx. /api/rematricula/CreateLinkRematricula
+import React, { useState } from 'react';
 import {
   Box,
-  Button,
-  TextField,
-  Typography,
-  CircularProgress,
-  Alert,
   Paper,
+  TextField,
+  Button,
+  Typography,
+  Alert,
+  CircularProgress,
+  List,
+  ListItem,
+  ListItemText,
+  Chip,
+  Stack,
 } from '@mui/material';
+import { useRouter } from 'next/router';
 import { HeaderForm } from '@/components/HeaderDefaultForm';
+import SchoolIcon from '@mui/icons-material/School';
+interface RematriculaResumo {
+  token: string;
+  alunoNome: string;
+  modalidadeOrigem: string;
+  nomeDaTurmaOrigem: string;
+  status: string;
+  resposta?: string;
+}
+
+const ANO_PADRAO = 2026;
 
 const formatCPF = (digits: string) => {
-  const clean = digits.slice(0, 11); // máximo 11 dígitos
+  const clean = digits.slice(0, 11);
   const p1 = clean.slice(0, 3);
   const p2 = clean.slice(3, 6);
   const p3 = clean.slice(6, 9);
@@ -28,133 +39,97 @@ const formatCPF = (digits: string) => {
   if (p2) result += '.' + p2;
   if (p3) result += '.' + p3;
   if (p4) result += '-' + p4;
-
   return result;
 };
 
-interface Match {
-  identificadorUnico: string;
-  nomeAluno: string;
-  modalidade: string;
-  turma: string;
-}
+const formatDataNascimento = (digits: string) => {
+  // transforma "27101993" -> "27/10/1993"
+  const clean = digits.slice(0, 8);
+  const d = clean.slice(0, 2);
+  const m = clean.slice(2, 4);
+  const y = clean.slice(4, 8);
+  let result = d;
+  if (m) result += '/' + m;
+  if (y) result += '/' + y;
+  return result;
+};
 
-const anoLetivo = 2026;
-
-const PortalRematriculaPage: React.FC = () => {
+const PortalDaRematriculaPage: React.FC = () => {
   const router = useRouter();
-  const [telefone, setTelefone] = useState('');
-  const [cpf, setCpf] = useState('');
+
+  const [cpfPagador, setCpfPagador] = useState('');
+  const [dataNascimento, setDataNascimento] = useState('');
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const [matches, setMatches] = useState<Match[] | null>(null);
+  const [rematriculas, setRematriculas] = useState<RematriculaResumo[]>([]);
 
-  const handleCpfChange = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleChangeCpf = (e: React.ChangeEvent<HTMLInputElement>) => {
     const onlyDigits = e.target.value.replace(/\D/g, '');
-    const formatted = formatCPF(onlyDigits);
-    setCpf(formatted);
+    setCpfPagador(formatCPF(onlyDigits));
   };
 
-  // função que realmente cria o link e redireciona
-  const handleRematricularMatch = useCallback(
-    async (match: Match) => {
-      try {
-        setCarregando(true);
-        setErro(null);
-        setInfo(
-          `Preparando rematrícula de ${match.nomeAluno} (${match.modalidade} - ${match.turma})...`,
-        );
+  const handleChangeDataNascimento = (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
+    const onlyDigits = e.target.value.replace(/\D/g, '');
+    setDataNascimento(formatDataNascimento(onlyDigits));
+  };
 
-        const resLink = await fetch('/api/rematricula/CreateLinkRematricula', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            identificadorUnico: match.identificadorUnico,
-            modalidadeOrigem: match.modalidade,
-            nomeDaTurmaOrigem: match.turma,
-            anoLetivo,
-          }),
-        });
-
-        const dataLink = await resLink.json();
-        if (!resLink.ok) {
-          throw new Error(
-            dataLink.error || 'Erro ao gerar link de rematrícula.',
-          );
-        }
-
-        const url = dataLink.url as string;
-        // vai para /rematricula/[token] normalmente
-        await router.push(url);
-      } catch (error: any) {
-        console.error(error);
-        setErro(error.message || 'Erro ao abrir rematrícula desta turma.');
-      } finally {
-        setCarregando(false);
-      }
-    },
-    [router],
-  );
-
-  const handleSubmit = async (e: FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErro(null);
     setInfo(null);
-    setMatches(null); // limpa resultados anteriores
+    setRematriculas([]);
 
-    const telefoneTrim = telefone.trim();
-    const cpfDigits = cpf.replace(/\D/g, '');
+    const cpfLimpo = cpfPagador.replace(/\D/g, '');
+    const dataNascStr = dataNascimento.trim();
 
-    if (!telefoneTrim) {
-      setErro('Informe o telefone WhatsApp do responsável.');
+    if (cpfLimpo.length !== 11) {
+      setErro('Informe um CPF válido (11 dígitos).');
       return;
     }
-
-    if (cpfDigits.length !== 11) {
-      setErro('Informe um CPF válido do responsável (11 dígitos).');
+    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(dataNascStr)) {
+      setErro('Informe a data de nascimento no formato DD/MM/AAAA.');
       return;
     }
 
     try {
       setCarregando(true);
-      const params = new URLSearchParams({
-        telefone: telefoneTrim,
-        cpf: cpfDigits,
-      });
 
-      const res = await fetch(
-        `/api/rematricula/findByContato?${params.toString()}`,
-      );
+      const res = await fetch('/api/rematricula/portalLookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          anoLetivo: ANO_PADRAO,
+          cpfPagador: cpfLimpo,
+          dataNascimento: dataNascStr,
+        }),
+      });
 
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.error || 'Erro ao localizar aluno.');
+        throw new Error(data.error || 'Erro ao buscar rematrícula.');
       }
 
-      const lista: Match[] = data.matches || [];
-      if (!lista.length) {
-        throw new Error(
-          'Nenhuma matrícula encontrada para esse telefone/CPF.',
-        );
+      if (!data.rematriculas || !data.rematriculas.length) {
+        setInfo('Nenhuma rematrícula encontrada para esses dados.');
+        return;
       }
 
-      if (lista.length === 1) {
-        // um vínculo só → já vai direto
-        await handleRematricularMatch(lista[0]);
-      } else {
-        // vários vínculos → usuário escolhe
-        setMatches(lista);
-        setInfo(
-          `Encontramos ${lista.length} matrículas. Escolha abaixo qual deseja rematricular.`,
-        );
-      }
+      setRematriculas(data.rematriculas as RematriculaResumo[]);
     } catch (error: any) {
       console.error(error);
-      setErro(error.message || 'Erro ao localizar aluno.');
+      setErro(
+        error.message || 'Erro ao buscar rematrícula. Tente novamente.',
+      );
     } finally {
       setCarregando(false);
     }
+  };
+
+  const handleIrParaRematricula = (token: string) => {
+    router.push(`/rematricula/${encodeURIComponent(token)}`);
   };
 
   return (
@@ -180,37 +155,30 @@ const PortalRematriculaPage: React.FC = () => {
           textAlign: 'center',
         }}
       >
-         <HeaderForm titulo={"Rematricula "+ anoLetivo} />
+         <HeaderForm titulo={"Rematricula"} />
           <br/>
         <Typography sx={{ mb: 2 }}>
-          Informe o <b>telefone e o CPF do responsável financeiro</b> para
-          realizar a rematricula do aluno(a)
+          Informe o <b>a data de nascimento do aluno e o CPF do responsável financeiro</b> para
+          realizar a rematricula.
         </Typography>
 
         <Box component="form" onSubmit={handleSubmit} noValidate>
           <TextField
             fullWidth
-            label="Telefone WhatsApp do responsável financeiro"
-            placeholder="Ex: 54999999999"
             margin="normal"
-            value={telefone}
-            onChange={(e) => setTelefone(e.target.value)}
-            inputProps={{
-              inputMode: 'tel',
-            }}
+            label="Data de nascimento do aluno"
+            placeholder="DD/MM/AAAA"
+            value={dataNascimento}
+            onChange={handleChangeDataNascimento}
           />
 
           <TextField
             fullWidth
+            margin="normal"
             label="CPF do responsável financeiro"
             placeholder="000.000.000-00"
-            margin="normal"
-            value={cpf}
-            onChange={handleCpfChange}
-            inputProps={{
-              inputMode: 'numeric',
-              pattern: '\\d*',
-            }}
+            value={cpfPagador}
+            onChange={handleChangeCpf}
           />
 
           <Box sx={{ mt: 2, mb: 1 }}>
@@ -241,36 +209,84 @@ const PortalRematriculaPage: React.FC = () => {
         </Box>
 
         {/* Lista de vínculos quando há mais de uma matrícula */}
-        {matches && matches.length > 1 && (
-          <Box sx={{ mt: 3, textAlign: 'left' }}>
-            {matches.map((m, idx) => (
-              <Paper
-                key={`${m.identificadorUnico}-${m.modalidade}-${m.turma}-${idx}`}
-                sx={{ p: 2, mb: 2 }}
-                variant="outlined"
-              >
-                <Typography>
-                  <b>Aluno:</b> {m.nomeAluno}
+        {rematriculas.length > 0 && (
+  <Box sx={{ mt: 4 }}>
+    <Typography variant="h6" component="h3" sx={{ mb: 2, fontWeight: 600, color: 'text.primary' }}>
+      Encontramos as seguintes rematrículas:
+    </Typography>
+    
+    <Stack spacing={2}>
+      {rematriculas.map((r) => (
+        <Paper
+          key={r.token}
+          elevation={0}
+          variant="outlined" // ou elevation={1} se preferir sombras
+          sx={{
+            p: 2,
+            borderRadius: 2,
+            borderColor: 'divider',
+            backgroundColor: 'background.paper',
+            transition: 'all 0.2s',
+            '&:hover': {
+              borderColor: 'primary.main',
+              boxShadow: 2
+            }
+          }}
+        >
+          <Box 
+            sx={{ 
+              display: 'flex', 
+              flexDirection: { xs: 'column', sm: 'row' }, // Coluna no celular, Linha no PC
+              justifyContent: 'space-between',
+              alignItems: { xs: 'flex-start', sm: 'center' },
+              gap: 2 
+            }}
+          >
+            {/* Bloco de Informações */}
+            <Box>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                  {r.alunoNome}
                 </Typography>
-                <Typography>
-                  <b>Modalidade:</b> {m.modalidade}
-                </Typography>
-                <Typography>
-                  <b>Turma atual:</b> {m.turma}
-                </Typography>
+                {/* Chip de Status dinâmico */}
+                <Chip 
+                  label={r.status} 
+                  size="small" 
+                  color={r.status === 'Pendente' ? 'warning' : 'default'} // Exemplo de lógica de cor
+                  variant="outlined"
+                />
+              </Box>
+              
+              <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                <SchoolIcon fontSize="inherit" /> {/* Ícone ilustrativo */}
+                {r.modalidadeOrigem} — {r.nomeDaTurmaOrigem}
+              </Typography>
 
-                <Button
-                  sx={{ mt: 1 }}
-                  variant="contained"
-                  size="small"
-                  onClick={() => handleRematricularMatch(m)}
-                  disabled={carregando}
-                >
-                  Rematricular esta turma
-                </Button>
-              </Paper>
-            ))}
+              {r.resposta && (
+                <Typography variant="caption" display="block" sx={{ mt: 1, color: 'info.main' }}>
+                  Resposta: {r.resposta}
+                </Typography>
+              )}
+            </Box>
+
+            {/* Botão de Ação */}
+            <Button
+              variant="contained"
+              disableElevation
+              onClick={() => handleIrParaRematricula(r.token)}
+              sx={{
+                whiteSpace: 'nowrap',
+                minWidth: '160px', // Garante um tamanho uniforme
+                alignSelf: { xs: 'stretch', sm: 'center' } // Botão esticado no mobile
+              }}
+            >
+              Fazer rematrícula
+            </Button>
           </Box>
+        </Paper>
+      ))}
+    </Stack>
+  </Box>
         )}
 
         <Typography sx={{ mt: 3, fontSize: 12, color: 'text.secondary' }}>
@@ -282,4 +298,4 @@ const PortalRematriculaPage: React.FC = () => {
   );
 };
 
-export default PortalRematriculaPage;
+export default PortalDaRematriculaPage
