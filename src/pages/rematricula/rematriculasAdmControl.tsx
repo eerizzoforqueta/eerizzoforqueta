@@ -233,6 +233,43 @@ const carregarRematriculas = async () => {
     );
   };
 
+  const handleExcluirRematriculasPendentes = async () => {
+  setErro(null);
+  setInfo(null);
+
+  if (!selecionados.length) {
+    setErro('Nenhuma rematrícula selecionada para exclusão.');
+    return;
+  }
+
+  try {
+    setAplicando(true);
+    const res = await fetch('/api/rematricula/excluirPendentes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        anoLetivo: anoLetivoPadrao,
+        idsSelecionados: selecionados,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || 'Erro ao excluir rematrículas pendentes.');
+    }
+
+    setInfo(
+      `Rematrículas excluídas: ${data.deleted}. Registros ignorados (já aplicados ou inexistentes): ${data.skipped}.`,
+    );
+    await carregarRematriculas();
+  } catch (error: any) {
+    console.error(error);
+    setErro(error.message || 'Erro ao excluir rematrículas pendentes.');
+  } finally {
+    setAplicando(false);
+  }
+};
+
   
   return (
     <Box sx={BoxStyleRematricula}>
@@ -283,16 +320,18 @@ const carregarRematriculas = async () => {
           {aplicando ? 'Rematriculando...' : '✅ Confirmar Rematriculas'}
         </Button>
 
-        <Button
-          variant="contained"
-          color="error"
-          onClick={handleExcluirNao}
-          disabled={carregando || aplicando}
-        >
-          🗑️ Excluir Alunos que não desejam rematricular-se.
-        </Button>
 
         {(carregando || aplicando) && <CircularProgress size={24} />}
+
+              <Button
+        variant="contained"
+        color="error"
+        onClick={handleExcluirRematriculasPendentes}
+        disabled={carregando || aplicando || !selecionados.length}
+      >
+       🗑️ Excluir rematrículas selecionadas (apenas pendentes)
+      </Button>
+
 
         <TextField
           label="Buscar aluno"
@@ -336,7 +375,7 @@ const carregarRematriculas = async () => {
 
           <TableBody>
             {rematriculasFiltradas.map((r) => {
-              const podeSelecionar = r.resposta === 'sim' && r.status === 'pendente';
+              const podeSelecionar = r.status === 'pendente';
               const selecionado = selecionados.includes(r.id);
               const data = new Date(r.timestamp || 0);
               const dataStr = isNaN(data.getTime()) ? '-' : data.toLocaleDateString('pt-BR'); // Simplifiquei para data curta
