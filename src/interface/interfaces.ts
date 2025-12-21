@@ -340,3 +340,64 @@ export interface DeleteAlunoAutocompleteOption {
   modalidade: string;
   nomeDaTurma: string;
 }
+
+
+export type RespostaTipo = 'sim' | 'nao';
+export type Mode = 'form' | 'respondida' | 'aplicada' | 'nao-rematriculado';
+
+export interface RematriculaRecord {
+  anoLetivo: number;
+  identificadorUnico: string;
+  modalidadeOrigem: string;
+  nomeDaTurmaOrigem: string;
+  resposta?: RespostaTipo | string | null;
+  status: string;
+
+  modalidadeDestino?: string | null;
+  turmaDestino?: string | null;
+
+  timestampResposta?: number;
+  timestampAplicacao?: number;
+
+  dadosAtualizados?: any;
+  turmasExtrasDestino?: Array<{ modalidadeDestino: string; turmaDestino: string }>;
+}
+
+
+export interface ExtraDestinoForm {
+  modalidadeDestino: string;
+  nucleoDestino: string;
+  turmaDestino: string;
+}
+
+
+
+export interface AlunoFromDB {
+  nome: string;
+  anoNascimento?: string;
+  telefoneComWhatsapp?: string | number;
+  informacoesAdicionais?: {
+    pagadorMensalidades?: {
+      nomeCompleto?: string;
+      email?: string;
+      celularWhatsapp?: string | number;
+      cpf?: string | number;
+    };
+  };
+}
+
+export interface PageProps {
+  token: string;
+  anoLetivo: number;
+
+  invalid: boolean;
+  mode: Mode;
+
+  rematricula: RematriculaRecord | null;
+  aluno: AlunoFromDB | null;
+
+  modalidades: Modalidade[]; // { nome, turmas: Turma[] }
+
+  // Bloqueios SSR (já matriculado em outra turma, já reservado por outra rematrícula, turma desabilitada pela direção)
+  blockedTurmaKeys: string[];
+}

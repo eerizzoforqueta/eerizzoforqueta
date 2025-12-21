@@ -80,7 +80,8 @@ const carregarRematriculas = async () => {
       turmasExtrasDestino: registro.turmasExtrasDestino?.map((extra) => ({
         ...extra,
         // Usa o ID que veio do banco OU gera um novo fixo agora
-        id: extra.id || crypto.randomUUID() 
+       id: extra.id || uuidv4()
+
       }))
     }));
 
@@ -119,8 +120,7 @@ const carregarRematriculas = async () => {
   // Agora usa a lista filtrada: "selecionar todos" leva em conta o filtro
   const selecionarTodosPendentesSim = () => {
     const ids = rematriculasFiltradas
-      .filter((r) => r.resposta === 'sim' && r.status === 'pendente')
-      .map((r) => r.id);
+      .filter((r) => r.resposta === 'sim' && (r.status === 'respondida' || (r.status === 'pendente' && r.timestamp)))      .map((r) => r.id);
     setSelecionados(ids);
   };
 
@@ -132,6 +132,8 @@ const carregarRematriculas = async () => {
       setErro('Nenhuma rematrícula selecionada.');
       return;
     }
+    console.log('idsSelecionados:', selecionados);
+    console.log('tem JWT?', selecionados.some((x) => String(x).includes('.')));
 
     try {
       setAplicando(true);
@@ -204,18 +206,44 @@ const carregarRematriculas = async () => {
   };
 
   // Função auxiliar para renderizar o Chip de Resposta
- const renderRespostaChip = (resposta: string) => {
-    const isSim = resposta.toLowerCase() === 'sim';
+const renderRespostaChip = (resposta?: string | null) => {
+  const r = (resposta || '').toString().toLowerCase();
+
+  if (r === 'sim') {
     return (
-      <Chip 
-        label={isSim ? "Sim" : "Não"} 
-        color={isSim ? "success" : "error"} 
-        variant={isSim ? "filled" : "outlined"}
+      <Chip
+        label="Sim"
+        color="success"
+        variant="filled"
         size="small"
-        sx={{ fontWeight: 'bold', minWidth: 60 }}
+        sx={{ fontWeight: 'bold', minWidth: 90 }}
       />
     );
-  };
+  }
+
+  if (r === 'nao') {
+    return (
+      <Chip
+        label="Não"
+        color="error"
+        variant="outlined"
+        size="small"
+        sx={{ fontWeight: 'bold', minWidth: 90 }}
+      />
+    );
+  }
+
+  return (
+    <Chip
+      label="Sem resposta"
+      color="default"
+      variant="outlined"
+      size="small"
+      sx={{ fontWeight: 'bold', minWidth: 120 }}
+    />
+  );
+};
+
 
   const renderStatusChip = (status: string) => {
     let color: 'default' | 'primary' | 'secondary' | 'error' | 'info' | 'success' | 'warning' = 'default';
@@ -228,11 +256,13 @@ const carregarRematriculas = async () => {
         label={status} 
         color={color} 
         size="small" 
-        sx={{ textTransform: 'capitalize' }}
+        sx={{ textTransform: 'capitalize' }}       
       />
     );
   };
 
+
+  
   const handleExcluirRematriculasPendentes = async () => {
   setErro(null);
   setInfo(null);
@@ -378,7 +408,11 @@ const carregarRematriculas = async () => {
               const podeSelecionar = r.status === 'pendente';
               const selecionado = selecionados.includes(r.id);
               const data = new Date(r.timestamp || 0);
-              const dataStr = isNaN(data.getTime()) ? '-' : data.toLocaleDateString('pt-BR'); // Simplifiquei para data curta
+             const dataStr =
+              r.timestamp && r.timestamp > 0
+                ? new Date(r.timestamp).toLocaleDateString('pt-BR')
+                : '-';
+
               
               // Formatação combinada para economizar colunas e melhorar leitura
               const origemStr = `${r.modalidadeOrigem} - ${r.nomeDaTurmaOrigem}`;

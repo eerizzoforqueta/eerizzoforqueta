@@ -1,9 +1,15 @@
 // src/pages/api/rematricula/aplicar.ts
 import type { NextApiRequest, NextApiResponse } from 'next';
 import admin from '@/config/firebaseAdmin';
+import jwt from 'jsonwebtoken';
 
 const db = admin.database();
 const ANO_PADRAO = 2026;
+
+const JWT_SECRET =
+  process.env.REMATRICULA_JWT_SECRET ||
+  process.env.JWT_SECRET ||
+  'rematricula-dev-secret';
 
 interface ExtraDestino {
   modalidadeDestino: string;
@@ -14,11 +20,15 @@ interface RematriculaNode {
   identificadorUnico: string;
   modalidadeOrigem: string;
   nomeDaTurmaOrigem: string;
+
   modalidadeDestino?: string | null;
   turmaDestino?: string | null;
-  turmasExtrasDestino?: ExtraDestino[];
-  resposta: 'sim' | 'nao' | string;
-  status: string;
+  turmasExtrasDestino?: ExtraDestino[] | null;
+
+  resposta?: 'sim' | 'nao' | string | null;
+  status?: string;
+
+  timestampResposta?: number | null;
   dadosAtualizados?: any;
 }
 
@@ -33,9 +43,7 @@ type Data = { moved: number; skipped: number } | { error: string };
 function normalizeAlunosToArray(alunosRaw: any): any[] {
   if (!alunosRaw) return [];
   if (Array.isArray(alunosRaw)) return alunosRaw.filter(Boolean);
-  if (typeof alunosRaw === 'object') {
-    return Object.values(alunosRaw).filter(Boolean);
-  }
+  if (typeof alunosRaw === 'object') return Object.values(alunosRaw).filter(Boolean);
   return [];
 }
 
@@ -71,6 +79,27 @@ function aplicarDadosAtualizados(alunoBase: any, dadosAtualizados: any): any {
   return clone;
 }
 
+// --- resolve UUID mesmo se vier JWT ---
+function resolveRematriculaKey(idOrToken: string): string | null {
+  if (!idOrToken) return null;
+
+  const isJwt = idOrToken.split('.').length === 3;
+  if (!isJwt) return idOrToken;
+
+  try {
+    const payload = jwt.verify(idOrToken, JWT_SECRET) as any;
+    const rematriculaId = payload?.rematriculaId;
+    return typeof rematriculaId === 'string' ? rematriculaId : null;
+  } catch {
+    return null;
+  }
+}
+
+// --- valida key segura (evita caracteres proibidos) ---
+function isValidDbKey(key: string): boolean {
+  return !!key && !/[.#$\[\]]/.test(key);
+}
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse<Data>,
@@ -92,7 +121,13 @@ export default async function handler(
     let moved = 0;
     let skipped = 0;
 
-    for (const id of idsSelecionados) {
+    for (const incomingId of idsSelecionados) {
+      const id = resolveRematriculaKey(String(incomingId || ''));
+      if (!id || !isValidDbKey(id)) {
+        skipped++;
+        continue;
+      }
+
       const remRef = db.ref(`rematriculas${ano}/${id}`);
       const remSnap = await remRef.once('value');
 
@@ -103,7 +138,14 @@ export default async function handler(
 
       const rem = remSnap.val() as RematriculaNode;
 
-      if (rem.resposta !== 'sim' || rem.status !== 'pendente') {
+      const status = (rem.status || '').toString();
+      const resposta = (rem.resposta || '').toString().toLowerCase();
+      const respondeu = !!rem.timestampResposta;
+
+      // Regra final:
+      // - Só aplica se já respondeu "sim" e ainda estiver pendente (ou legado "respondida")
+      const statusAceito = status === 'pendente' || status === 'respondida';
+      if (!statusAceito || resposta !== 'sim' || !respondeu) {
         skipped++;
         continue;
       }
@@ -124,10 +166,7 @@ export default async function handler(
       }
 
       // 1) Localizar turma de origem
-      const turmasOrigSnap = await db
-        .ref(`modalidades/${modalidadeOrigem}/turmas`)
-        .once('value');
-
+      const turmasOrigSnap = await db.ref(`modalidades/${modalidadeOrigem}/turmas`).once('value');
       const turmasOrigVal = turmasOrigSnap.val() || [];
       const turmasOrigArr: any[] = Array.isArray(turmasOrigVal)
         ? turmasOrigVal
@@ -146,9 +185,7 @@ export default async function handler(
       const alunosOrigArr = normalizeAlunosToArray(turmaOrigAtual.alunos);
 
       const alunoIndex = alunosOrigArr.findIndex(
-        (a) =>
-          a?.informacoesAdicionais?.IdentificadorUnico ===
-          identificadorUnico,
+        (a) => a?.informacoesAdicionais?.IdentificadorUnico === identificadorUnico,
       );
 
       if (alunoIndex === -1) {
@@ -157,47 +194,37 @@ export default async function handler(
       }
 
       const alunoBase = alunosOrigArr[alunoIndex];
-      const alunoAtualizado = aplicarDadosAtualizados(
-        alunoBase,
-        dadosAtualizados,
-      );
+      const alunoAtualizado = aplicarDadosAtualizados(alunoBase, dadosAtualizados);
 
-      // 2) Remover da turma de origem (exceto se o destino principal for a mesma turma)
-      const manterNaOrigemComoExtra =
+      // 2) Remover da origem (exceto se destino principal for a mesma turma)
+      const manterNaOrigem =
         modalidadeDestino === modalidadeOrigem &&
         turmaDestino === nomeDaTurmaOrigem;
 
       let novosAlunosOrig = alunosOrigArr;
 
-      if (!manterNaOrigemComoExtra) {
+      if (!manterNaOrigem) {
         novosAlunosOrig = alunosOrigArr.filter(
-          (a) =>
-            a?.informacoesAdicionais?.IdentificadorUnico !==
-            identificadorUnico,
+          (a) => a?.informacoesAdicionais?.IdentificadorUnico !== identificadorUnico,
         );
       }
 
-      await db
-        .ref(`modalidades/${modalidadeOrigem}/turmas/${idxOrig}`)
-        .update({
-          alunos: novosAlunosOrig,
-          capacidade_atual_da_turma: novosAlunosOrig.length,
-          contadorAlunos: novosAlunosOrig.length,
-        });
+      await db.ref(`modalidades/${modalidadeOrigem}/turmas/${idxOrig}`).update({
+        alunos: novosAlunosOrig,
+        capacidade_atual_da_turma: novosAlunosOrig.length,
+        contadorAlunos: novosAlunosOrig.length,
+      });
 
-      // 3) Montar lista de destinos (principal + extras)
+      // 3) Destinos (principal + extras)
       const destinos: ExtraDestino[] = [];
 
       if (modalidadeDestino && turmaDestino) {
-        destinos.push({
-          modalidadeDestino,
-          turmaDestino,
-        });
+        destinos.push({ modalidadeDestino, turmaDestino });
       }
 
       if (Array.isArray(turmasExtrasDestino)) {
         for (const extra of turmasExtrasDestino) {
-          if (extra.modalidadeDestino && extra.turmaDestino) {
+          if (extra?.modalidadeDestino && extra?.turmaDestino) {
             destinos.push({
               modalidadeDestino: extra.modalidadeDestino,
               turmaDestino: extra.turmaDestino,
@@ -206,7 +233,7 @@ export default async function handler(
         }
       }
 
-      // Remover duplicados (mesma modalidade/turma)
+      // Dedup (principal/extras repetidos)
       const vistos = new Set<string>();
       const destinosUnicos = destinos.filter((d) => {
         const key = `${d.modalidadeDestino}:::${d.turmaDestino}`;
@@ -215,12 +242,9 @@ export default async function handler(
         return true;
       });
 
-      // 4) Aplicar o aluno em cada turma de destino, sempre em array
+      // 4) Inserir em cada destino
       for (const dest of destinosUnicos) {
-        const turmasDestSnap = await db
-          .ref(`modalidades/${dest.modalidadeDestino}/turmas`)
-          .once('value');
-
+        const turmasDestSnap = await db.ref(`modalidades/${dest.modalidadeDestino}/turmas`).once('value');
         const turmasDestVal = turmasDestSnap.val() || [];
         const turmasDestArr: any[] = Array.isArray(turmasDestVal)
           ? turmasDestVal
@@ -230,36 +254,25 @@ export default async function handler(
           (t) => t && t.nome_da_turma === dest.turmaDestino,
         );
 
-        if (idxDest === -1) {
-          // turma não encontrada, ignora só esse destino
-          continue;
-        }
+        if (idxDest === -1) continue;
 
         const turmaDestAtual = turmasDestArr[idxDest];
         const alunosDestArr = normalizeAlunosToArray(turmaDestAtual.alunos);
 
         const jaExiste = alunosDestArr.some(
-          (a) =>
-            a?.informacoesAdicionais?.IdentificadorUnico ===
-            identificadorUnico,
+          (a) => a?.informacoesAdicionais?.IdentificadorUnico === identificadorUnico,
         );
 
-        if (!jaExiste) {
-          alunosDestArr.push(alunoAtualizado);
-        }
+        if (!jaExiste) alunosDestArr.push(alunoAtualizado);
 
-        await db
-          .ref(
-            `modalidades/${dest.modalidadeDestino}/turmas/${idxDest}`,
-          )
-          .update({
-            alunos: alunosDestArr,
-            capacidade_atual_da_turma: alunosDestArr.length,
-            contadorAlunos: alunosDestArr.length,
-          });
+        await db.ref(`modalidades/${dest.modalidadeDestino}/turmas/${idxDest}`).update({
+          alunos: alunosDestArr,
+          capacidade_atual_da_turma: alunosDestArr.length,
+          contadorAlunos: alunosDestArr.length,
+        });
       }
 
-      // 5) Marcar rematrícula como aplicada
+      // 5) Finaliza rematrícula
       await remRef.update({
         status: 'aplicada',
         timestampAplicacao: Date.now(),
@@ -271,8 +284,6 @@ export default async function handler(
     return res.status(200).json({ moved, skipped });
   } catch (error) {
     console.error('Erro em /api/rematricula/aplicar:', error);
-    return res
-      .status(500)
-      .json({ error: 'Erro ao aplicar rematrículas.' });
+    return res.status(500).json({ error: 'Erro ao aplicar rematrículas.' });
   }
 }

@@ -15,32 +15,74 @@ interface RematriculaRecordFromDB {
   identificadorUnico: string;
   modalidadeOrigem: string;
   nomeDaTurmaOrigem: string;
+
   modalidadeDestino?: string | null;
   turmaDestino?: string | null;
-  resposta?: string;
+
+  resposta?: string | null;
   status?: string;
-  timestamp?: number;
-  timestampResposta?: number;
-  createdAt?: number;
-  turmasExtrasDestino?: ExtraDestino[];
+
+  timestamp?: number | null;
+  timestampResposta?: number | null;
+  createdAt?: number | null;
+
+  turmasExtrasDestino?: ExtraDestino[] | null;
   dadosAtualizados?: any;
 }
 
 interface RespItem {
-  id: string;
+  id: string; // UUID (key do node)
   identificadorUnico: string;
   alunoNome: string | null;
+
   modalidadeOrigem: string;
   nomeDaTurmaOrigem: string;
+
   modalidadeDestino: string | null;
   turmaDestino: string | null;
-  resposta: string;
-  status: string;
-  timestamp: number;
+
+  resposta: string | null; // null = sem resposta
+  status: string;          // pendente | aplicada (e talvez legado)
+  timestamp: number;       // para ordenar/exibir
   turmasExtrasDestino: ExtraDestino[];
+
+  // extras úteis (não obrigatórios no front)
+  respondida: boolean;
+  respondidaEm: number | null;
 }
 
 type RespData = RespItem[] | { error: string };
+
+function toArrayMaybe(val: any): any[] {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.filter(Boolean);
+  if (typeof val === 'object') return Object.values(val).filter(Boolean);
+  return [];
+}
+
+function buildAlunoNomeIndex(modalidadesVal: any): Record<string, string> {
+  const index: Record<string, string> = {};
+
+  for (const modNome of Object.keys(modalidadesVal || {})) {
+    const mod = modalidadesVal[modNome];
+    const turmasArr = toArrayMaybe(mod?.turmas);
+
+    for (const turma of turmasArr) {
+      const alunosArr = toArrayMaybe(turma?.alunos);
+
+      for (const a of alunosArr) {
+        const idUnico = a?.informacoesAdicionais?.IdentificadorUnico;
+        const nome = a?.nome;
+
+        if (idUnico && nome && !index[idUnico]) {
+          index[idUnico] = nome;
+        }
+      }
+    }
+  }
+
+  return index;
+}
 
 export default async function handler(
   req: NextApiRequest,
@@ -48,78 +90,67 @@ export default async function handler(
 ) {
   if (req.method !== 'GET') {
     res.setHeader('Allow', ['GET']);
-    return res
-      .status(405)
-      .json({ error: `Method ${req.method} Not Allowed` });
+    return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
   }
 
   try {
-    const anoLetivoParam = req.query.anoLetivo;
-    const ano = Number(anoLetivoParam || ANO_PADRAO);
+    const ano = Number(req.query.anoLetivo || ANO_PADRAO);
 
-    // 1) Carrega rematrículas
+    // 1) rematrículas
     const snap = await db.ref(`rematriculas${ano}`).once('value');
     const val = (snap.val() as Record<string, RematriculaRecordFromDB>) || {};
 
-    // 2) Carrega modalidades uma vez só, para descobrir o nome do aluno
+    // 2) modalidades (para index de nomes)
     const modalidadesSnap = await db.ref('modalidades').once('value');
     const modalidadesVal = modalidadesSnap.val() || {};
-
-    function getAlunoNome(identificadorUnico: string): string | null {
-      for (const modNome of Object.keys(modalidadesVal)) {
-        const mod = modalidadesVal[modNome];
-        const turmasObj = mod.turmas || {};
-        for (const turmaKey of Object.keys(turmasObj)) {
-          const turma = turmasObj[turmaKey];
-          const alunosObj = turma.alunos || {};
-          for (const aKey of Object.keys(alunosObj)) {
-            const a = alunosObj[aKey];
-            if (
-              a?.informacoesAdicionais?.IdentificadorUnico ===
-              identificadorUnico
-            ) {
-              return a.nome || null;
-            }
-          }
-        }
-      }
-      return null;
-    }
+    const nomeIndex = buildAlunoNomeIndex(modalidadesVal);
 
     const result: RespItem[] = [];
 
     for (const [id, raw] of Object.entries(val)) {
       const r = raw as RematriculaRecordFromDB;
 
-      const alunoNome = getAlunoNome(r.identificadorUnico);
+      const alunoNome = nomeIndex[r.identificadorUnico] || null;
 
-      // usa timestampResposta em primeiro lugar
+      const resposta = r.resposta ?? null;
+      const respondida = !!r.timestampResposta || resposta === 'sim' || resposta === 'nao';
+
       const timestamp =
-        r.timestampResposta ??
-        r.timestamp ??
-        r.createdAt ??
+        (r.timestampResposta ?? null) ??
+        (r.createdAt ?? null) ??
+        (r.timestamp ?? null) ??
         0;
 
       result.push({
         id,
         identificadorUnico: r.identificadorUnico,
         alunoNome,
+
         modalidadeOrigem: r.modalidadeOrigem,
         nomeDaTurmaOrigem: r.nomeDaTurmaOrigem,
+
         modalidadeDestino: r.modalidadeDestino ?? null,
         turmaDestino: r.turmaDestino ?? null,
-        resposta: r.resposta ?? '',
-        status: r.status ?? '',
-        timestamp,
-        turmasExtrasDestino: r.turmasExtrasDestino || [],
+
+        resposta,
+        status: r.status ?? 'pendente',
+        timestamp: Number(timestamp || 0),
+
+        turmasExtrasDestino: (r.turmasExtrasDestino || []).filter(
+          (e) => e?.modalidadeDestino && e?.turmaDestino,
+        ) as ExtraDestino[],
+
+        respondida,
+        respondidaEm: r.timestampResposta ?? null,
       });
     }
+
+    // mais recente primeiro
+    result.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
     return res.status(200).json(result);
   } catch (error) {
     console.error('Erro em /api/rematricula/list:', error);
-    return res
-      .status(500)
-      .json({ error: 'Erro ao listar rematrículas.' });
+    return res.status(500).json({ error: 'Erro ao listar rematrículas.' });
   }
 }
