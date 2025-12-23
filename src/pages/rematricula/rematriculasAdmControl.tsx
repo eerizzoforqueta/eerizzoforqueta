@@ -19,6 +19,7 @@ import {
 } from '@mui/material';
 import { BoxStyleRematricula, tableHeaderStyle, tableRowHoverStyle } from '@/utils/Styles';
 import {v4 as uuidv4} from 'uuid';
+import ResponsiveAppBar from '@/components/TopBarComponents/TopBar';
 interface ExtraDestino {
   modalidadeDestino?: string;
   turmaDestino?: string;
@@ -302,6 +303,9 @@ const renderRespostaChip = (resposta?: string | null) => {
 
   
   return (
+    <>
+     <ResponsiveAppBar />
+  
     <Box sx={BoxStyleRematricula}>
       <Typography variant="h5" sx={{ fontWeight: '800', mb: 1, color: "#333" }}>
         Rematrículas {anoLetivoPadrao}
@@ -472,6 +476,7 @@ const renderRespostaChip = (resposta?: string | null) => {
         </Table>
       </TableContainer>
     </Box>
+      </>
   );
 };
 

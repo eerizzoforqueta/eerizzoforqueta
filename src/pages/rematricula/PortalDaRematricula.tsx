@@ -1,5 +1,5 @@
-// src/pages/rematricula/index.tsx. /api/rematricula/CreateLinkRematricula
-import React, { useState } from 'react';
+// src/pages/rematricula/PortaldaRematricula.tsx
+import React, { useMemo, useState } from 'react';
 import {
   Box,
   Paper,
@@ -8,22 +8,23 @@ import {
   Typography,
   Alert,
   CircularProgress,
-  List,
-  ListItem,
-  ListItemText,
   Chip,
   Stack,
+  Switch,
+  FormControlLabel,
+  Divider,
 } from '@mui/material';
 import { useRouter } from 'next/router';
 import { HeaderForm } from '@/components/HeaderDefaultForm';
 import SchoolIcon from '@mui/icons-material/School';
+
 interface RematriculaResumo {
   token: string;
   alunoNome: string;
   modalidadeOrigem: string;
   nomeDaTurmaOrigem: string;
-  status: string;
-  resposta?: string;
+  status: string; // "pendente" | "aplicada" | ...
+  resposta?: string | null; // "sim" | "nao" | null
 }
 
 const ANO_PADRAO = 2026;
@@ -43,7 +44,7 @@ const formatCPF = (digits: string) => {
 };
 
 const formatDataNascimento = (digits: string) => {
-  // transforma "27101993" -> "27/10/1993"
+  // "27101993" -> "27/10/1993"
   const clean = digits.slice(0, 8);
   const d = clean.slice(0, 2);
   const m = clean.slice(2, 4);
@@ -53,6 +54,26 @@ const formatDataNascimento = (digits: string) => {
   if (y) result += '/' + y;
   return result;
 };
+
+function normalizeStatusLabel(status: string) {
+  const s = (status || '').toLowerCase().trim();
+  if (s === 'pendente') return 'Pendente';
+  if (s === 'aplicada') return 'Confirmada';
+  if (!s) return '-';
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function isRespondida(r: RematriculaResumo) {
+  const resp = (r.resposta ?? '').toString().toLowerCase().trim();
+  return resp === 'sim' || resp === 'nao';
+}
+
+function chipColorFor(r: RematriculaResumo): 'default' | 'warning' | 'success' | 'info' {
+  const status = (r.status || '').toLowerCase().trim();
+  if (status === 'aplicada') return 'success';
+  if (isRespondida(r)) return 'warning'; // respondida mas ainda pendente (aguardando admin)
+  return 'info'; // não respondida
+}
 
 const PortalDaRematriculaPage: React.FC = () => {
   const router = useRouter();
@@ -64,14 +85,15 @@ const PortalDaRematriculaPage: React.FC = () => {
   const [info, setInfo] = useState<string | null>(null);
   const [rematriculas, setRematriculas] = useState<RematriculaResumo[]>([]);
 
+  // ✅ filtro (default: só não respondidas)
+  const [somenteNaoRespondidas, setSomenteNaoRespondidas] = useState(true);
+
   const handleChangeCpf = (e: React.ChangeEvent<HTMLInputElement>) => {
     const onlyDigits = e.target.value.replace(/\D/g, '');
     setCpfPagador(formatCPF(onlyDigits));
   };
 
-  const handleChangeDataNascimento = (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) => {
+  const handleChangeDataNascimento = (e: React.ChangeEvent<HTMLInputElement>) => {
     const onlyDigits = e.target.value.replace(/\D/g, '');
     setDataNascimento(formatDataNascimento(onlyDigits));
   };
@@ -118,11 +140,11 @@ const PortalDaRematriculaPage: React.FC = () => {
       }
 
       setRematriculas(data.rematriculas as RematriculaResumo[]);
+      // mantém o filtro default ativo
+      setSomenteNaoRespondidas(true);
     } catch (error: any) {
       console.error(error);
-      setErro(
-        error.message || 'Erro ao buscar rematrícula. Tente novamente.',
-      );
+      setErro(error.message || 'Erro ao buscar rematrícula. Tente novamente.');
     } finally {
       setCarregando(false);
     }
@@ -131,6 +153,15 @@ const PortalDaRematriculaPage: React.FC = () => {
   const handleIrParaRematricula = (token: string) => {
     router.push(`/rematricula/${encodeURIComponent(token)}`);
   };
+
+  const rematriculasVisiveis = useMemo(() => {
+    if (!somenteNaoRespondidas) return rematriculas;
+    return rematriculas.filter((r) => !isRespondida(r));
+  }, [rematriculas, somenteNaoRespondidas]);
+
+  const temNaoRespondidas = useMemo(() => {
+    return rematriculas.some((r) => !isRespondida(r));
+  }, [rematriculas]);
 
   return (
     <Box
@@ -143,9 +174,6 @@ const PortalDaRematriculaPage: React.FC = () => {
         padding: 2,
       }}
     >
-      
-     
-                  
       <Paper
         elevation={4}
         sx={{
@@ -155,11 +183,12 @@ const PortalDaRematriculaPage: React.FC = () => {
           textAlign: 'center',
         }}
       >
-         <HeaderForm titulo={"Rematricula"} />
-          <br/>
+        <HeaderForm titulo={'Rematricula'} />
+        <br />
+
         <Typography sx={{ mb: 2 }}>
-          Informe o <b>a data de nascimento do aluno e o CPF do responsável financeiro</b> para
-          realizar a rematricula.
+          Informe <b>a data de nascimento do aluno e o CPF do responsável financeiro</b> para
+          realizar a rematrícula.
         </Typography>
 
         <Box component="form" onSubmit={handleSubmit} noValidate>
@@ -208,94 +237,154 @@ const PortalDaRematriculaPage: React.FC = () => {
           )}
         </Box>
 
-        {/* Lista de vínculos quando há mais de uma matrícula */}
+        {/* Lista quando há vínculos */}
         {rematriculas.length > 0 && (
-  <Box sx={{ mt: 4 }}>
-    <Typography variant="h6" component="h3" sx={{ mb: 2, fontWeight: 600, color: 'text.primary' }}>
-      Encontramos as seguintes rematrículas:
-    </Typography>
-    
-    <Stack spacing={2}>
-      {rematriculas.map((r) => (
-        <Paper
-          key={r.token}
-          elevation={0}
-          variant="outlined" // ou elevation={1} se preferir sombras
-          sx={{
-            p: 2,
-            borderRadius: 2,
-            borderColor: 'divider',
-            backgroundColor: 'background.paper',
-            transition: 'all 0.2s',
-            '&:hover': {
-              borderColor: 'primary.main',
-              boxShadow: 2
-            }
-          }}
-        >
-          <Box 
-            sx={{ 
-              display: 'flex', 
-              flexDirection: { xs: 'column', sm: 'row' }, // Coluna no celular, Linha no PC
-              justifyContent: 'space-between',
-              alignItems: { xs: 'flex-start', sm: 'center' },
-              gap: 2 
-            }}
-          >
-            {/* Bloco de Informações */}
-            <Box>
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
-                  {r.alunoNome}
-                </Typography>
-                {/* Chip de Status dinâmico */}
-                <Chip 
-                  label={r.status} 
-                  size="small" 
-                  color={r.status === 'Pendente' ? 'warning' : 'default'} // Exemplo de lógica de cor
-                  variant="outlined"
-                />
-              </Box>
-              
-              <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                <SchoolIcon fontSize="inherit" /> {/* Ícone ilustrativo */}
-                {r.modalidadeOrigem} — {r.nomeDaTurmaOrigem}
-              </Typography>
-
-              {r.resposta && (
-                <Typography variant="caption" display="block" sx={{ mt: 1, color: 'info.main' }}>
-                  Resposta: {r.resposta}
-                </Typography>
-              )}
-            </Box>
-
-            {/* Botão de Ação */}
-            <Button
-              variant="contained"
-              disableElevation
-              onClick={() => handleIrParaRematricula(r.token)}
+          <Box sx={{ mt: 4, textAlign: 'left' }}>
+            <Box
               sx={{
-                whiteSpace: 'nowrap',
-                minWidth: '160px', // Garante um tamanho uniforme
-                alignSelf: { xs: 'stretch', sm: 'center' } // Botão esticado no mobile
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 2,
+                mb: 1.5,
+                flexWrap: 'wrap',
               }}
             >
-              Fazer rematrícula
-            </Button>
+              <Typography variant="h6" component="h3" sx={{ fontWeight: 600, color: 'text.primary' }}>
+                Rematrículas encontradas
+              </Typography>
+
+              {/* ✅ Filtro */}
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={somenteNaoRespondidas}
+                    onChange={(e) => setSomenteNaoRespondidas(e.target.checked)}
+                  />
+                }
+                label="Mostrar apenas não respondidas"
+              />
+            </Box>
+
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Total: <b>{rematriculas.length}</b> • Não respondidas:{' '}
+              <b>{rematriculas.filter((r) => !isRespondida(r)).length}</b>
+            </Typography>
+
+            <Divider sx={{ mb: 2 }} />
+
+            {/* ✅ Mensagem quando não há pendentes/não respondidas */}
+            {somenteNaoRespondidas && !temNaoRespondidas && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Não há rematrículas <b>não respondidas</b> para estes dados. <br />
+                Se você quiser ver as rematrículas já respondidas (pendentes de confirmação ou confirmadas),
+                desative o filtro “Mostrar apenas não respondidas”.
+              </Alert>
+            )}
+
+            <Stack spacing={2}>
+              {rematriculasVisiveis.map((r) => {
+                const respondida = isRespondida(r);
+                const statusLabel = normalizeStatusLabel(r.status);
+                const chipColor = chipColorFor(r);
+
+                return (
+                  <Paper
+                    key={r.token}
+                    elevation={0}
+                    variant="outlined"
+                    sx={{
+                      p: 2,
+                      borderRadius: 2,
+                      borderColor: 'divider',
+                      backgroundColor: 'background.paper',
+                      transition: 'all 0.2s',
+                      '&:hover': {
+                        borderColor: 'primary.main',
+                        boxShadow: 2,
+                      },
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        flexDirection: { xs: 'column', sm: 'row' },
+                        justifyContent: 'space-between',
+                        alignItems: { xs: 'flex-start', sm: 'center' },
+                        gap: 2,
+                      }}
+                    >
+                      <Box>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 'bold' }}>
+                            {r.alunoNome}
+                          </Typography>
+
+                          <Chip
+                            label={statusLabel}
+                            size="small"
+                            color={chipColor}
+                            variant="outlined"
+                          />
+
+                          {respondida && (
+                            <Chip
+                              label="Respondida"
+                              size="small"
+                              color="default"
+                              variant="filled"
+                              sx={{ opacity: 0.9 }}
+                            />
+                          )}
+                        </Box>
+
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                          sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}
+                        >
+                          <SchoolIcon fontSize="inherit" />
+                          {r.modalidadeOrigem} — {r.nomeDaTurmaOrigem}
+                        </Typography>
+
+                        {respondida && (
+                          <Typography
+                            variant="caption"
+                            display="block"
+                            sx={{ mt: 1, color: 'text.secondary' }}
+                          >
+                            Resposta registrada: <b>{String(r.resposta).toUpperCase()}</b>
+                          </Typography>
+                        )}
+                      </Box>
+
+                      <Button
+                        variant={respondida ? 'outlined' : 'contained'}
+                        disableElevation
+                        onClick={() => handleIrParaRematricula(r.token)}
+                        sx={{
+                          whiteSpace: 'nowrap',
+                          minWidth: '170px',
+                          alignSelf: { xs: 'stretch', sm: 'center' },
+                        }}
+                      >
+                        {respondida ? 'Ver rematrícula' : 'Fazer rematrícula'}
+                      </Button>
+                    </Box>
+                  </Paper>
+                );
+              })}
+            </Stack>
           </Box>
-        </Paper>
-      ))}
-    </Stack>
-  </Box>
         )}
 
         <Typography sx={{ mt: 3, fontSize: 12, color: 'text.secondary' }}>
-          Caso os dados não sejam encontrados ou estejam incorretos, entre em
-          contato com a direção da escola para atualizar o cadastro.
+          Caso os dados não sejam encontrados ou estejam incorretos, entre em contato com a direção da
+          escola para atualizar o cadastro.
         </Typography>
       </Paper>
     </Box>
   );
 };
 
-export default PortalDaRematriculaPage
+export default PortalDaRematriculaPage;

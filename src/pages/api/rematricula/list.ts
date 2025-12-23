@@ -8,11 +8,13 @@ const ANO_PADRAO = 2026;
 interface ExtraDestino {
   modalidadeDestino: string;
   turmaDestino: string;
+  turmaDestinoUuid?: string | null;
 }
 
 interface RematriculaRecordFromDB {
   anoLetivo: number;
   identificadorUnico: string;
+
   modalidadeOrigem: string;
   nomeDaTurmaOrigem: string;
 
@@ -20,14 +22,19 @@ interface RematriculaRecordFromDB {
   turmaDestino?: string | null;
 
   resposta?: string | null;
-  status?: string;
+  status?: string | null;
 
-  timestamp?: number | null;
+  timestamp?: number | null; // legado
   timestampResposta?: number | null;
+  timestampAplicacao?: number | null;
+
   createdAt?: number | null;
 
   turmasExtrasDestino?: ExtraDestino[] | null;
   dadosAtualizados?: any;
+
+  alunoKey?: string | null;
+  alunoKeyRaw?: string | null;
 }
 
 interface RespItem {
@@ -41,14 +48,11 @@ interface RespItem {
   modalidadeDestino: string | null;
   turmaDestino: string | null;
 
-  resposta: string | null; // null = sem resposta
-  status: string;          // pendente | aplicada (e talvez legado)
-  timestamp: number;       // para ordenar/exibir
-  turmasExtrasDestino: ExtraDestino[];
+  resposta: string; // "sim" | "nao" (aqui não volta sem resposta)
+  status: string;   // "pendente" | "aplicada" | etc
+  timestamp: number;
 
-  // extras úteis (não obrigatórios no front)
-  respondida: boolean;
-  respondidaEm: number | null;
+  turmasExtrasDestino: ExtraDestino[];
 }
 
 type RespData = RespItem[] | { error: string };
@@ -96,7 +100,7 @@ export default async function handler(
   try {
     const ano = Number(req.query.anoLetivo || ANO_PADRAO);
 
-    // 1) rematrículas
+    // 1) rematrículas do ano
     const snap = await db.ref(`rematriculas${ano}`).once('value');
     const val = (snap.val() as Record<string, RematriculaRecordFromDB>) || {};
 
@@ -110,38 +114,45 @@ export default async function handler(
     for (const [id, raw] of Object.entries(val)) {
       const r = raw as RematriculaRecordFromDB;
 
+      const resposta = (r.resposta ?? '').toString().toLowerCase().trim();
+      const status = (r.status ?? '').toString().trim();
+
+      const respondeu =
+        !!r.timestampResposta ||
+        resposta === 'sim' ||
+        resposta === 'nao';
+
+      const aplicada = status === 'aplicada';
+
+      // ✅ FILTRO PRINCIPAL:
+      // só aparece no painel se foi respondida OU aplicada
+      if (!respondeu && !aplicada) {
+        continue;
+      }
+
       const alunoNome = nomeIndex[r.identificadorUnico] || null;
 
-      const resposta = r.resposta ?? null;
-      const respondida = !!r.timestampResposta || resposta === 'sim' || resposta === 'nao';
-
       const timestamp =
-        (r.timestampResposta ?? null) ??
-        (r.createdAt ?? null) ??
-        (r.timestamp ?? null) ??
+        (r.timestampAplicacao ?? null) ||
+        (r.timestampResposta ?? null) ||
+        (r.timestamp ?? null) ||
+        (r.createdAt ?? null) ||
         0;
 
       result.push({
         id,
         identificadorUnico: r.identificadorUnico,
         alunoNome,
-
         modalidadeOrigem: r.modalidadeOrigem,
         nomeDaTurmaOrigem: r.nomeDaTurmaOrigem,
-
         modalidadeDestino: r.modalidadeDestino ?? null,
         turmaDestino: r.turmaDestino ?? null,
-
-        resposta,
-        status: r.status ?? 'pendente',
-        timestamp: Number(timestamp || 0),
-
-        turmasExtrasDestino: (r.turmasExtrasDestino || []).filter(
-          (e) => e?.modalidadeDestino && e?.turmaDestino,
-        ) as ExtraDestino[],
-
-        respondida,
-        respondidaEm: r.timestampResposta ?? null,
+        resposta: resposta || '-', // aqui não deve mais vir vazio (mas fica seguro)
+        status: status || '',
+        timestamp,
+        turmasExtrasDestino: Array.isArray(r.turmasExtrasDestino)
+          ? r.turmasExtrasDestino
+          : [],
       });
     }
 

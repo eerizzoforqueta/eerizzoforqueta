@@ -22,6 +22,7 @@ import { DataGrid, GridColDef } from '@mui/x-data-grid';
 import { useData } from '@/context/context';
 import { Modalidade, Turma } from '@/interface/interfaces';
 import { authOptions } from '@/pages/api/auth/[...nextauth]';
+import ResponsiveAppBar from '@/components/TopBarComponents/TopBar';
 
 const ANO = 2026;
 
@@ -199,6 +200,9 @@ export default function AdminRematriculaTurmasPage() {
   ];
 
   return (
+    <>
+     <ResponsiveAppBar />
+   
     <Box sx={{ p: 3 }}>
       <Typography variant="h5" sx={{ fontWeight: 800, mb: 1 }}>
         Controle de Turmas da Rematrícula (Ano {ANO})
@@ -268,6 +272,7 @@ export default function AdminRematriculaTurmasPage() {
         />
       </Paper>
     </Box>
+     </>
   );
 }
 
