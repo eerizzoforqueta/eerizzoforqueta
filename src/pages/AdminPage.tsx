@@ -81,8 +81,9 @@ const drawer = (
       {[
         { icon: <HomeIcon color="primary" />, text: 'Página Inicial', href: '/' },
         { icon: <GroupAddIcon color="secondary" />, text: 'Cadastrar alunos', href: '/StudentRegistration' },
-         { icon: <GroupAddIcon color="success" />, text: 'Painel de Controle de rematriculas', href: '/rematricula/rematriculasAdmControl' },
-        { icon: <AssignmentIndIcon color="info" />, text: 'Portal da rematricula', href: '/rematricula/PortalDaRematricula ' },
+         { icon: <GroupAddIcon color="success" />, text: 'Painel de Controle de Rematriculas', href: '/rematricula/rematriculasAdmControl' },
+          { icon: <GroupAddIcon color="success" />, text: 'Painel de Controle de Turmas de Rematricula', href: '/rematricula/config/ControlShowTurmasPage' },
+        { icon: <AssignmentIndIcon color="info" />, text: 'Portal da Rematricula', href: '/rematricula/PortalDaRematricula ' },
         { icon: <SettingsIcon color="error" />, text: 'Trocar aluno de turma', href: '/StudentUpdateTurmas' },
         { icon: <ListAltIcon color="action" />, text: 'Listas de chamada', href: '/StudentPresenceTable' },
         { icon: <UpdateIcon color="disabled" />, text: 'Atualização cadastral', href: '/StudentUpdatePersonalInformation' },
