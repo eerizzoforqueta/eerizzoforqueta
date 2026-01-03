@@ -74,8 +74,11 @@ function resolveRematriculaKey(tokenOrId: string): string | null {
  * Normaliza data DD/MM/YYYY => YYYYMMDD (string).
  * Se vier qualquer outro formato, tenta extrair dígitos.
  */
-function birthToYYYYMMDD(birthRaw: string): { yyyymmdd: string; dd: string; mm: string; yyyy: string } | null {
+function birthToYYYYMMDD(
+  birthRaw: string,
+): { yyyymmdd: string; dd: string; mm: string; yyyy: string } | null {
   const s = String(birthRaw || '').trim();
+
   const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (m) {
     const dd = m[1].padStart(2, '0');
@@ -84,9 +87,7 @@ function birthToYYYYMMDD(birthRaw: string): { yyyymmdd: string; dd: string; mm: 
     return { yyyymmdd: `${yyyy}${mm}${dd}`, dd, mm, yyyy };
   }
 
-  // fallback: pega dígitos e tenta inferir (bem conservador)
   const digits = s.replace(/\D/g, '');
-  // se for ddmmyyyy (8)
   if (digits.length === 8) {
     const dd = digits.slice(0, 2);
     const mm = digits.slice(2, 4);
@@ -107,6 +108,28 @@ function makeAlunoKeyLegacy(cpfDigits: string, dd: string, mm: string, yyyy: str
   return `${cpfDigits}|${dd}/${mm}/${yyyy}`;
 }
 
+function tryParseAlunoKeySafe(alunoKeySafe: string): { cpf: string; dd: string; mm: string; yyyy: string; yyyymmdd: string } | null {
+  const s = String(alunoKeySafe || '').trim();
+  const m = s.match(/^(\d{11})_(\d{8})$/);
+  if (!m) return null;
+  const cpf = m[1];
+  const yyyymmdd = m[2];
+  const yyyy = yyyymmdd.slice(0, 4);
+  const mm = yyyymmdd.slice(4, 6);
+  const dd = yyyymmdd.slice(6, 8);
+  return { cpf, dd, mm, yyyy, yyyymmdd };
+}
+
+function tryParseAlunoKeyRaw(alunoKeyRaw: string): { cpf: string; dd: string; mm: string; yyyy: string } | null {
+  const s = String(alunoKeyRaw || '').trim();
+  // formato esperado: 11digitos|DD/MM/YYYY
+  const m = s.match(/^(\d{11})\|(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (m) {
+    return { cpf: m[1], dd: m[2], mm: m[3], yyyy: m[4] };
+  }
+  return null;
+}
+
 async function resolveTurmaUuid(modalidade: string, nomeDaTurma: string): Promise<string | null> {
   const turmasSnap = await db.ref(`modalidades/${modalidade}/turmas`).once('value');
   const turmasArr = toArrayMaybe(turmasSnap.val());
@@ -123,10 +146,55 @@ async function isTurmaHabilitadaByUuid(ano: number, uuidTurma: string): Promise<
 }
 
 /**
- * Busca aluno na turma de origem desta rematrícula e monta:
- * - alunoKeySafe (SEM /)
- * - alunoKeyLegacyPath (com / apenas para consultar locks antigos)
- * - alunoKeyRaw (humano)
+ * Busca aluno EM QUALQUER turma (varredura global) pelo IdentificadorUnico.
+ * Isso corrige o caso em que a turma de origem não tem CPF/DN preenchidos.
+ */
+async function getAlunoIdentityFromAnyTurma(
+  identificadorUnico: string,
+): Promise<{
+  cpfDigits: string;
+  birthRaw: string;
+  alunoKeySafe: string;
+  alunoKeyRaw: string;
+  alunoKeyLegacyPath: string;
+} | null> {
+  const modalidadesSnap = await db.ref('modalidades').once('value');
+  const modalidadesVal = modalidadesSnap.val() || {};
+
+  for (const modNome of Object.keys(modalidadesVal || {})) {
+    const mod = modalidadesVal[modNome];
+    const turmasArr = toArrayMaybe(mod?.turmas);
+
+    for (const turma of turmasArr) {
+      const alunosArr = toArrayMaybe(turma?.alunos);
+
+      for (const aluno of alunosArr) {
+        if (aluno?.informacoesAdicionais?.IdentificadorUnico !== identificadorUnico) continue;
+
+        const cpfDigits = digitsOnly(aluno?.informacoesAdicionais?.pagadorMensalidades?.cpf);
+        const birthRaw = String(aluno?.anoNascimento || '').trim();
+        if (!cpfDigits || !birthRaw) continue;
+
+        const parsed = birthToYYYYMMDD(birthRaw);
+        if (!parsed) continue;
+
+        const alunoKeySafe = makeAlunoKeySafe(cpfDigits, parsed.yyyymmdd);
+        const alunoKeyRaw = `${cpfDigits}|${parsed.dd}/${parsed.mm}/${parsed.yyyy}`;
+        const alunoKeyLegacyPath = makeAlunoKeyLegacy(cpfDigits, parsed.dd, parsed.mm, parsed.yyyy);
+
+        if (!isValidDbKey(alunoKeySafe)) continue;
+
+        return { cpfDigits, birthRaw, alunoKeySafe, alunoKeyRaw, alunoKeyLegacyPath };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Busca aluno na turma de origem desta rematrícula.
+ * Mantemos como fallback, mas não é mais a fonte principal.
  */
 async function getAlunoIdentityFromOrigem(
   modalidadeOrigem: string,
@@ -164,6 +232,78 @@ async function getAlunoIdentityFromOrigem(
   if (!isValidDbKey(alunoKeySafe)) return null;
 
   return { cpfDigits, birthRaw, alunoKeySafe, alunoKeyRaw, alunoKeyLegacyPath };
+}
+
+/**
+ * Resolve identidade do aluno com prioridade:
+ * 1) rematrícula já tem alunoKey/alunoKeyRaw (melhor caso)
+ * 2) varredura global por IdentificadorUnico
+ * 3) fallback turma de origem
+ */
+async function resolveAlunoIdentity(
+  atual: any,
+): Promise<{
+  cpfDigits: string;
+  birthRaw: string;
+  alunoKeySafe: string;
+  alunoKeyRaw: string;
+  alunoKeyLegacyPath: string;
+} | null> {
+  // (1) tentativa via campos já gravados na própria rematrícula
+  const keySafe = String(atual?.alunoKey || '').trim();
+  const keyRaw = String(atual?.alunoKeyRaw || '').trim();
+
+  const parsedSafe = keySafe ? tryParseAlunoKeySafe(keySafe) : null;
+  if (parsedSafe) {
+    const alunoKeySafe = makeAlunoKeySafe(parsedSafe.cpf, parsedSafe.yyyymmdd);
+    const alunoKeyRaw = `${parsedSafe.cpf}|${parsedSafe.dd}/${parsedSafe.mm}/${parsedSafe.yyyy}`;
+    const alunoKeyLegacyPath = makeAlunoKeyLegacy(parsedSafe.cpf, parsedSafe.dd, parsedSafe.mm, parsedSafe.yyyy);
+
+    if (isValidDbKey(alunoKeySafe)) {
+      return {
+        cpfDigits: parsedSafe.cpf,
+        birthRaw: `${parsedSafe.dd}/${parsedSafe.mm}/${parsedSafe.yyyy}`,
+        alunoKeySafe,
+        alunoKeyRaw,
+        alunoKeyLegacyPath,
+      };
+    }
+  }
+
+  const parsedRaw = keyRaw ? tryParseAlunoKeyRaw(keyRaw) : null;
+  if (parsedRaw) {
+    const yyyymmdd = `${parsedRaw.yyyy}${parsedRaw.mm}${parsedRaw.dd}`;
+    const alunoKeySafe = makeAlunoKeySafe(parsedRaw.cpf, yyyymmdd);
+    const alunoKeyRaw = `${parsedRaw.cpf}|${parsedRaw.dd}/${parsedRaw.mm}/${parsedRaw.yyyy}`;
+    const alunoKeyLegacyPath = makeAlunoKeyLegacy(parsedRaw.cpf, parsedRaw.dd, parsedRaw.mm, parsedRaw.yyyy);
+
+    if (isValidDbKey(alunoKeySafe)) {
+      return {
+        cpfDigits: parsedRaw.cpf,
+        birthRaw: `${parsedRaw.dd}/${parsedRaw.mm}/${parsedRaw.yyyy}`,
+        alunoKeySafe,
+        alunoKeyRaw,
+        alunoKeyLegacyPath,
+      };
+    }
+  }
+
+  // (2) varredura global por IdentificadorUnico
+  const identificadorUnico = String(atual?.identificadorUnico || '');
+  if (identificadorUnico) {
+    const any = await getAlunoIdentityFromAnyTurma(identificadorUnico);
+    if (any) return any;
+  }
+
+  // (3) fallback turma de origem
+  const modOrigem = String(atual?.modalidadeOrigem || '');
+  const turmaOrigemNome = String(atual?.nomeDaTurmaOrigem || '');
+  if (identificadorUnico && modOrigem && turmaOrigemNome) {
+    const origem = await getAlunoIdentityFromOrigem(modOrigem, turmaOrigemNome, identificadorUnico);
+    if (origem) return origem;
+  }
+
+  return null;
 }
 
 /**
@@ -267,16 +407,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       return res.status(400).json({ error: 'Rematrícula inválida (dados incompletos).' });
     }
 
-    const alunoIdentity = await getAlunoIdentityFromOrigem(modOrigem, turmaOrigemNome, identificadorUnico);
+    // ✅ NOVO: resolve identidade sem depender da turma de origem
+    const alunoIdentity = await resolveAlunoIdentity(atual);
     if (!alunoIdentity) {
       return res.status(400).json({
         error:
           'Não foi possível validar CPF do pagador e data de nascimento do aluno no cadastro. ' +
-          'Verifique se esses campos existem nesta turma de origem.',
+          'Verifique se esses campos existem em pelo menos uma turma/matrícula do aluno.',
       });
     }
 
     const { alunoKeySafe, alunoKeyLegacyPath, alunoKeyRaw } = alunoIdentity;
+
+    // ✅ backfill (para não falhar na próxima vez)
+    if (String(atual?.alunoKey || '') !== alunoKeySafe || String(atual?.alunoKeyRaw || '') !== alunoKeyRaw) {
+      await remRef.update({
+        alunoKey: alunoKeySafe,
+        alunoKeyRaw,
+      });
+    }
 
     // resposta "nao": só grava
     if (resposta === 'nao') {

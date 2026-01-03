@@ -15,8 +15,8 @@ const JWT_SECRET =
 
 type Body = {
   anoLetivo?: number;
-  cpfPagador: string;        // só dígitos
-  dataNascimento: string;    // "DD/MM/AAAA"
+  cpfPagador: string; // só dígitos
+  dataNascimento: string; // "DD/MM/AAAA"
 };
 
 type RematriculaResumo = {
@@ -24,13 +24,11 @@ type RematriculaResumo = {
   alunoNome: string | null;
   modalidadeOrigem: string;
   nomeDaTurmaOrigem: string;
-  status: string;            // pendente | aplicada | ...
-  resposta?: string | null;  // sim | nao | null
+  status: string; // pendente | aplicada | ...
+  resposta?: string | null; // sim | nao | null
 };
 
-type Data =
-  | { rematriculas: RematriculaResumo[] }
-  | { error: string };
+type Data = { rematriculas: RematriculaResumo[] } | { error: string };
 
 // -------------------- helpers --------------------
 
@@ -62,6 +60,27 @@ function hasResposta(rr: any) {
   return rr?.resposta === 'sim' || rr?.resposta === 'nao' || !!rr?.timestampResposta;
 }
 
+/**
+ * dn "DD/MM/AAAA" => partes normalizadas
+ */
+function parseDateBR(dn: string): { dd: string; mm: string; yyyy: string; yyyymmdd: string } | null {
+  const s = String(dn || '').trim();
+  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return null;
+  const dd = m[1];
+  const mm = m[2];
+  const yyyy = m[3];
+  return { dd, mm, yyyy, yyyymmdd: `${yyyy}${mm}${dd}` };
+}
+
+function makeAlunoKeySafe(cpfDigits: string, yyyymmdd: string) {
+  return `${cpfDigits}_${yyyymmdd}`;
+}
+
+function makeAlunoKeyRaw(cpfDigits: string, dd: string, mm: string, yyyy: string) {
+  return `${cpfDigits}|${dd}/${mm}/${yyyy}`;
+}
+
 // monta um índice: (modalidade:::nomeTurma) -> uuidTurma
 function buildTurmaUuidIndex(modalidadesVal: any): Record<string, string> {
   const idx: Record<string, string> = {};
@@ -85,10 +104,7 @@ function buildTurmaUuidIndex(modalidadesVal: any): Record<string, string> {
 
 // -------------------- handler --------------------
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse<Data>,
-) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse<Data>) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
     return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
@@ -107,6 +123,14 @@ export default async function handler(
     if (!isValidDateBR(dn)) {
       return res.status(400).json({ error: 'Data de nascimento inválida (use DD/MM/AAAA).' });
     }
+
+    const parsedDn = parseDateBR(dn);
+    if (!parsedDn) {
+      return res.status(400).json({ error: 'Data de nascimento inválida (use DD/MM/AAAA).' });
+    }
+
+    const alunoKeySafe = makeAlunoKeySafe(cpf, parsedDn.yyyymmdd);
+    const alunoKeyRaw = makeAlunoKeyRaw(cpf, parsedDn.dd, parsedDn.mm, parsedDn.yyyy);
 
     // ---- 1) carrega modalidades e encontra o aluno por (cpfPagador + dataNascimento) ----
     const modalidadesSnap = await db.ref('modalidades').once('value');
@@ -169,9 +193,7 @@ export default async function handler(
     }
 
     // conjunto de origens atuais (para filtragem de rematrículas existentes)
-    const currentOrigemKeys = new Set<string>(
-      turmasAtuais.map((t) => keyOrigem(t.modalidade, t.nome_da_turma)),
-    );
+    const currentOrigemKeys = new Set<string>(turmasAtuais.map((t) => keyOrigem(t.modalidade, t.nome_da_turma)));
 
     // ---- 2) carrega TODAS as rematrículas do ano e filtra só as do aluno ----
     const remSnap = await db.ref(`rematriculas${ano}`).once('value');
@@ -182,6 +204,20 @@ export default async function handler(
     for (const [remId, rr] of Object.entries(remVal as Record<string, any>)) {
       if (rr?.identificadorUnico !== identificadorUnico) continue;
       remsDoAluno.push({ id: remId, rr });
+    }
+
+    // ✅ NOVO: backfill alunoKey/alunoKeyRaw em rematrículas existentes do aluno (quando estiver vazio)
+    // Isso evita o erro no confirm quando a turma de origem não tem CPF/DN.
+    for (const { id, rr } of remsDoAluno) {
+      const needKey = !rr?.alunoKey || String(rr.alunoKey).trim() === '';
+      const needRaw = !rr?.alunoKeyRaw || String(rr.alunoKeyRaw).trim() === '';
+
+      if (needKey || needRaw) {
+        await db.ref(`rematriculas${ano}/${id}`).update({
+          alunoKey: alunoKeySafe,
+          alunoKeyRaw,
+        });
+      }
     }
 
     // ---- 3) calcula DESTINOS/EXTRAS “ocupados” (locks reais) a partir das rematrículas existentes ----
@@ -212,9 +248,7 @@ export default async function handler(
 
           const exUuid =
             String(ex?.turmaDestinoUuid || '') ||
-            (exMod && exTurma
-              ? turmaUuidIndex[keyOrigem(String(exMod), String(exTurma))]
-              : '');
+            (exMod && exTurma ? turmaUuidIndex[keyOrigem(String(exMod), String(exTurma))] : '');
 
           if (exUuid) lockedDestUuids.add(exUuid);
         }
@@ -290,6 +324,10 @@ export default async function handler(
         nomeDaTurmaOrigem: t.nome_da_turma,
         status: 'pendente',
         createdAt: Date.now(),
+
+        // ✅ NOVO: grava identidade já no creation
+        alunoKey: alunoKeySafe,
+        alunoKeyRaw,
       });
 
       byOrigem.set(origemK, {

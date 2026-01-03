@@ -707,9 +707,7 @@ const getVagas = (t: Turma) => {
               {/* Mensagem amigável quando não há turmas para principal */}
               {modalidadeDestino && principalNoOptions && (
                 <Alert severity="warning" sx={{ mt: 1 }}>
-                  Não há turmas disponíveis para este aluno nesta modalidade/núcleo como turma principal.
-                  Isso pode ocorrer por bloqueios (já matriculado, já escolhido em outra rematrícula,
-                  ou turmas desabilitadas pela direção) ou turmas lotadas.
+                 A turma frequentada pelo aluno em 2025 não está disponível para rematrícula. Por favor, selecione uma nova turma para 2026.
                 </Alert>
               )}
 
