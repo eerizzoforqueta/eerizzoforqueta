@@ -118,7 +118,7 @@ async function resolveTurmaUuid(modalidade: string, nomeDaTurma: string): Promis
 async function isTurmaHabilitadaByUuid(ano: number, uuidTurma: string): Promise<boolean> {
   const enabledSnap = await db.ref(`rematriculaConfig/${ano}/turmas/${uuidTurma}/enabled`).once('value');
   const enabledVal = enabledSnap.val();
-  if (enabledVal === null || enabledVal === undefined) return true; // política: sem config = habilitada
+  if (enabledVal === null || enabledVal === undefined) return false;
   return enabledVal === true;
 }
 

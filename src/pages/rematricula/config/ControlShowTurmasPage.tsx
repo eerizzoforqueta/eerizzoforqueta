@@ -210,7 +210,7 @@ export default function AdminRematriculaTurmasPage() {
 
       <Typography sx={{ mb: 2, color: 'text.secondary' }}>
         Aqui você define exatamente quais turmas aparecem para o aluno escolher durante a rematrícula.
-        Se “Visível” estiver desligado, a turma não aparece no [token].tsx.
+       
       </Typography>
 
       <Paper sx={{ p: 2, mb: 2 }}>

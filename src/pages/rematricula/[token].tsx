@@ -110,41 +110,53 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
   }
 
   // --------- Sets / helpers ----------
-  const blockedSet = useMemo(() => new Set(blockedTurmaKeys || []), [blockedTurmaKeys]);
+  const blockedSet = useMemo(() => new Set(blockedTurmaKeys), [blockedTurmaKeys]);
 
   const inferNucleoFrom = (modalidadeNome: string, turmaNome: string): string => {
     const mod = modalidades.find((m) => m.nome === modalidadeNome);
     const turma = mod?.turmas?.find((t) => t?.nome_da_turma === turmaNome);
     return turma?.nucleo || '';
   };
+      
 
-  const getVagas = (t: Turma) =>
-    (t.capacidade_maxima_da_turma || 0) - (t.capacidade_atual_da_turma || 0);
+  const toNum = (v: any): number => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : NaN;
+};
 
-  const isLotada = (t: Turma) => getVagas(t) <= 0;
+const getCapMax = (t: Turma): number => toNum((t as any).capacidade_maxima_da_turma);
+
+const getCapAtual = (t: Turma): number => {
+  const a = toNum((t as any).capacidade_atual_da_turma);
+  if (Number.isFinite(a)) return a;
+
+  const c = toNum((t as any).contadorAlunos);
+  if (Number.isFinite(c)) return c;
+
+  // se não existir nada, assume 0
+  return 0;
+};
+
+ // ✅ Se max não existe/é inválido/<=0, NÃO considera lotada.
+const isLotada = (t: Turma) => {
+  const max = getCapMax(t);
+  if (!Number.isFinite(max) || max <= 0) return false;
+
+  const atual = getCapAtual(t);
+  return atual >= max;
+};
+
+// ✅ Se max não existe/é inválido/<=0, vagas "livre"
+const getVagas = (t: Turma) => {
+  const max = getCapMax(t);
+  if (!Number.isFinite(max) || max <= 0) return null; // null = ilimitado/desconhecido
+
+  const atual = getCapAtual(t);
+  return Math.max(0, max - atual);
+};
 
   // --------- Readonly e bloqueio global ----------
   const isReadOnly = mode !== 'form';
-
-  // “globalNoOptions”: não existe nenhuma turma disponível (não bloqueada e não lotada) no banco inteiro
-  const globalNoOptions = useMemo(() => {
-    let available = 0;
-    for (const m of modalidades) {
-      for (const t of m.turmas || []) {
-        const turmaNome = t?.nome_da_turma;
-        if (!turmaNome) continue;
-        const k = keyOf(m.nome, turmaNome);
-        if (blockedSet.has(k)) continue;
-        if (isLotada(t)) continue;
-        available++;
-        if (available > 0) return false;
-      }
-    }
-    return true;
-  }, [modalidades, blockedSet]);
-
-  // Se não tem nenhuma opção no sistema, trava tudo
-  const disableAllFields = isReadOnly || globalNoOptions;
 
   // --------- Estado do formulário ----------
   const [resposta, setResposta] = useState<RespostaTipo>(() => {
@@ -174,7 +186,9 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
     return raw.map((e) => ({
       modalidadeDestino: e.modalidadeDestino || '',
       nucleoDestino:
-        e.modalidadeDestino && e.turmaDestino ? inferNucleoFrom(e.modalidadeDestino, e.turmaDestino) : '',
+        e.modalidadeDestino && e.turmaDestino
+          ? inferNucleoFrom(e.modalidadeDestino, e.turmaDestino)
+          : '',
       turmaDestino: e.turmaDestino || '',
     }));
   });
@@ -204,24 +218,28 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
   const [erro, setErro] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
-  // ✅ NOVO: após sucesso (info), desabilita botão confirmar
+  // ✅ após sucesso (info), trava geral
   const submittedSuccessfully = Boolean(info);
 
-  // --------- Derivados: opções principal ----------
-  const modalidadeAtual = useMemo(
-    () => modalidades.find((m) => m.nome === modalidadeDestino),
-    [modalidades, modalidadeDestino],
-  );
+  // “globalNoOptions”: não existe nenhuma turma disponível (não bloqueada e não lotada) no banco inteiro
+  const globalNoOptions = useMemo(() => {
+    for (const m of modalidades) {
+      for (const t of m.turmas || []) {
+        const turmaNome = t?.nome_da_turma;
+        if (!turmaNome) continue;
+        const k = keyOf(m.nome, turmaNome);
+        if (blockedSet.has(k)) continue;
+        if (isLotada(t)) continue;
+        return false;
+      }
+    }
+    return true;
+  }, [modalidades, blockedSet]);
 
-  const nucleosPrincipal = useMemo(() => {
-    if (!modalidadeAtual) return [];
-    const setNucs = new Set<string>();
-    (modalidadeAtual.turmas || []).forEach((t) => {
-      if (t?.nucleo) setNucs.add(t.nucleo);
-    });
-    return Array.from(setNucs);
-  }, [modalidadeAtual]);
+  // ✅ trava tudo em: readonly, sem opções globais, ou já enviado com sucesso
+  const disableAllFields = isReadOnly || globalNoOptions || submittedSuccessfully;
 
+  // --------- Derivados: chaves selecionadas ----------
   const selectedExtraKeys = useMemo(() => {
     const set = new Set<string>();
     extras.forEach((e) => {
@@ -237,7 +255,33 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
     return keyOf(modalidadeDestino, turmaDestino);
   }, [modalidadeDestino, turmaDestino]);
 
-  // Turmas “visíveis” no select (remove bloqueadas; remove lotadas)
+  // --------- Derivados: opções principal ----------
+  const modalidadeAtual = useMemo(
+    () => modalidades.find((m) => m.nome === modalidadeDestino),
+    [modalidades, modalidadeDestino],
+  );
+
+  // ✅ Núcleos visíveis: só núcleos que têm pelo menos 1 turma elegível (não bloqueada, não lotada e não duplicada com extras)
+  const nucleosPrincipalVisiveis = useMemo(() => {
+    if (!modalidadeAtual) return [];
+    const set = new Set<string>();
+
+    for (const t of modalidadeAtual.turmas || []) {
+      if (!t?.nome_da_turma) continue;
+
+      const k = keyOf(modalidadeAtual.nome, t.nome_da_turma);
+      if (blockedSet.has(k)) continue;
+      if (selectedExtraKeys.has(k)) continue;
+      if (isLotada(t)) continue;
+
+      const nucleo = (t.nucleo || '').trim();
+      if (nucleo) set.add(nucleo);
+    }
+
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [modalidadeAtual, blockedSet, selectedExtraKeys]);
+
+  // Turmas “visíveis” no select principal
   const turmasPrincipalVisiveis = useMemo(() => {
     if (!modalidadeAtual) return [];
 
@@ -247,13 +291,8 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
 
       const k = keyOf(modalidadeAtual.nome, t.nome_da_turma);
 
-      // Remove bloqueadas SSR
       if (blockedSet.has(k)) return false;
-
-      // Evita duplicar com extras já selecionados (para o usuário “nem enxergar”)
       if (selectedExtraKeys.has(k)) return false;
-
-      // Remove lotadas do select (nem exibe)
       if (isLotada(t)) return false;
 
       return true;
@@ -265,8 +304,6 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
     return turmasPrincipalVisiveis.length > 0;
   }, [modalidadeDestino, turmasPrincipalVisiveis.length]);
 
-  // Se o usuário já tinha uma turma salva, mas agora ela está bloqueada/lotada/inexistente,
-  // exibimos um “item especial” (disabled) para não deixar o select “vazio sem explicação”.
   const principalSelectionIsInvalidNow = useMemo(() => {
     if (!modalidadeDestino || !turmaDestino) return false;
     const mod = modalidades.find((m) => m.nome === modalidadeDestino);
@@ -279,7 +316,6 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
     if (isLotada(t)) return true;
     if (nucleoDestino && t.nucleo !== nucleoDestino) return true;
 
-    // Se não aparece na lista visível, é inválida no contexto atual
     const isVisible = turmasPrincipalVisiveis.some((x) => x.nome_da_turma === turmaDestino);
     return !isVisible;
   }, [
@@ -292,15 +328,9 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
     turmasPrincipalVisiveis,
   ]);
 
-  // --------- Derivados: opções extras ----------
-  const getNucleosForExtra = (modalidadeNome: string) => {
-    const mod = modalidades.find((m) => m.nome === modalidadeNome);
-    if (!mod) return [];
-    const setNucs = new Set<string>();
-    (mod.turmas || []).forEach((t) => t?.nucleo && setNucs.add(t.nucleo));
-    return Array.from(setNucs);
-  };
+  const principalNoOptions = Boolean(modalidadeDestino) && turmasPrincipalVisiveis.length === 0;
 
+  // --------- Derivados: extras ----------
   const getTurmasVisiveisForExtra = (index: number) => {
     const extra = extras[index];
     const mod = modalidades.find((m) => m.nome === extra.modalidadeDestino);
@@ -309,7 +339,9 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
     const otherExtraKeys = new Set<string>();
     extras.forEach((e, i) => {
       if (i === index) return;
-      if (e.modalidadeDestino && e.turmaDestino) otherExtraKeys.add(keyOf(e.modalidadeDestino, e.turmaDestino));
+      if (e.modalidadeDestino && e.turmaDestino) {
+        otherExtraKeys.add(keyOf(e.modalidadeDestino, e.turmaDestino));
+      }
     });
 
     return (mod.turmas || []).filter((t) => {
@@ -318,25 +350,50 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
 
       const k = keyOf(mod.nome, t.nome_da_turma);
 
-      // Remove bloqueadas SSR
       if (blockedSet.has(k)) return false;
-
-      // Remove lotadas do select
       if (isLotada(t)) return false;
-
-      // Não permitir repetir a turma principal
       if (principalKey && k === principalKey) return false;
-
-      // Não permitir repetir outra extra já selecionada
       if (otherExtraKeys.has(k)) return false;
 
       return true;
     });
   };
 
+  // ✅ Núcleos visíveis para extra: só núcleos com pelo menos 1 turma elegível
+  const getNucleosVisiveisForExtra = (index: number) => {
+    const extra = extras[index];
+    const mod = modalidades.find((m) => m.nome === extra.modalidadeDestino);
+    if (!mod) return [];
+
+    const otherExtraKeys = new Set<string>();
+    extras.forEach((e, i) => {
+      if (i === index) return;
+      if (e.modalidadeDestino && e.turmaDestino) {
+        otherExtraKeys.add(keyOf(e.modalidadeDestino, e.turmaDestino));
+      }
+    });
+
+    const set = new Set<string>();
+
+    for (const t of mod.turmas || []) {
+      if (!t?.nome_da_turma) continue;
+
+      const k = keyOf(mod.nome, t.nome_da_turma);
+      if (blockedSet.has(k)) continue;
+      if (isLotada(t)) continue;
+      if (principalKey && k === principalKey) continue;
+      if (otherExtraKeys.has(k)) continue;
+
+      const nucleo = (t.nucleo || '').trim();
+      if (nucleo) set.add(nucleo);
+    }
+
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  };
+
   const extraHasAvailable = (index: number) => {
     const extra = extras[index];
-    if (!extra.modalidadeDestino) return true; // ainda não escolheu
+    if (!extra.modalidadeDestino) return true;
     return getTurmasVisiveisForExtra(index).length > 0;
   };
 
@@ -350,14 +407,16 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
 
     const k = keyOf(extra.modalidadeDestino, extra.turmaDestino);
 
-    // Regras
     if (blockedSet.has(k)) return true;
     if (principalKey && k === principalKey) return true;
 
-    // duplicada com outra extra
     const duplicatesOtherExtra = extras.some((e, i) => {
       if (i === index) return false;
-      return e.modalidadeDestino && e.turmaDestino && keyOf(e.modalidadeDestino, e.turmaDestino) === k;
+      return (
+        e.modalidadeDestino &&
+        e.turmaDestino &&
+        keyOf(e.modalidadeDestino, e.turmaDestino) === k
+      );
     });
     if (duplicatesOtherExtra) return true;
 
@@ -566,6 +625,12 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
           </Alert>
         )}
 
+        {submittedSuccessfully && (
+          <Alert severity="success" sx={{ mb: 2 }}>
+            Rematrícula enviada. Por segurança, o formulário foi bloqueado para evitar alterações duplicadas.
+          </Alert>
+        )}
+
         <Divider sx={{ my: 2 }} />
 
         <Box component="form" onSubmit={handleSubmit} noValidate>
@@ -625,15 +690,22 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
                 <MenuItem value="">
                   <em>Todos</em>
                 </MenuItem>
-                {nucleosPrincipal.map((n) => (
-                  <MenuItem key={n} value={n}>
-                    {n}
+
+                {modalidadeDestino && nucleosPrincipalVisiveis.length === 0 ? (
+                  <MenuItem value="__no_nucleo__" disabled>
+                    Não há núcleos disponíveis (sem turmas elegíveis)
                   </MenuItem>
-                ))}
+                ) : (
+                  nucleosPrincipalVisiveis.map((n) => (
+                    <MenuItem key={n} value={n}>
+                      {n}
+                    </MenuItem>
+                  ))
+                )}
               </TextField>
 
               {/* Mensagem amigável quando não há turmas para principal */}
-              {modalidadeDestino && !principalHasAvailable && (
+              {modalidadeDestino && principalNoOptions && (
                 <Alert severity="warning" sx={{ mt: 1 }}>
                   Não há turmas disponíveis para este aluno nesta modalidade/núcleo como turma principal.
                   Isso pode ocorrer por bloqueios (já matriculado, já escolhido em outra rematrícula,
@@ -647,7 +719,7 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
                 label="Turma principal"
                 margin="normal"
                 value={turmaDestino}
-                disabled={disableAllFields || !modalidadeDestino || !principalHasAvailable}
+                disabled={disableAllFields || !modalidadeDestino}
                 onChange={(e) => {
                   if (disableAllFields) return;
                   setTurmaDestino(e.target.value);
@@ -657,20 +729,27 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
                   <em>Selecione...</em>
                 </MenuItem>
 
+                {principalNoOptions && (
+                  <MenuItem value="__no_options__" disabled>
+                    Não há turmas disponíveis para este aluno nesta modalidade/núcleo.
+                  </MenuItem>
+                )}
+
                 {turmaDestino && principalSelectionIsInvalidNow && (
                   <MenuItem value={turmaDestino} disabled>
                     {turmaDestino} — (Selecionada anteriormente, mas indisponível)
                   </MenuItem>
                 )}
 
-                {turmasPrincipalVisiveis.map((t) => {
-                  const vagas = getVagas(t);
-                  return (
-                    <MenuItem key={t.nome_da_turma} value={t.nome_da_turma}>
-                      {t.nome_da_turma} — Vagas disponíveis: {vagas}
-                    </MenuItem>
-                  );
-                })}
+               {turmasPrincipalVisiveis.map((t) => {
+                const vagas = getVagas(t);
+                return (
+                  <MenuItem key={t.nome_da_turma} value={t.nome_da_turma}>
+                    {t.nome_da_turma} — {vagas === null ? 'Vagas: livre' : `Vagas disponíveis: ${vagas}`}
+                  </MenuItem>
+                );
+              })}
+
               </TextField>
 
               <Divider sx={{ my: 2 }} />
@@ -695,10 +774,11 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
               </Button>
 
               {extras.map((extra, index) => {
-                const nucleosExtra = getNucleosForExtra(extra.modalidadeDestino);
+                const nucleosExtraVisiveis = getNucleosVisiveisForExtra(index);
                 const turmasExtraVisiveis = getTurmasVisiveisForExtra(index);
                 const hasAvailable = extraHasAvailable(index);
                 const invalidSelectionNow = extraSelectionIsInvalidNow(index);
+                const extraNoOptions = Boolean(extra.modalidadeDestino) && turmasExtraVisiveis.length === 0;
 
                 return (
                   <Paper key={index} variant="outlined" sx={{ p: 2, mb: 2 }}>
@@ -711,7 +791,11 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
                       }}
                     >
                       <Typography>Horário extra {index + 1}</Typography>
-                      <IconButton size="small" onClick={() => handleRemoveExtra(index)} disabled={disableAllFields}>
+                      <IconButton
+                        size="small"
+                        onClick={() => handleRemoveExtra(index)}
+                        disabled={disableAllFields}
+                      >
                         <DeleteIcon fontSize="small" />
                       </IconButton>
                     </Box>
@@ -747,14 +831,21 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
                       <MenuItem value="">
                         <em>Todos</em>
                       </MenuItem>
-                      {nucleosExtra.map((n) => (
-                        <MenuItem key={n} value={n}>
-                          {n}
+
+                      {extra.modalidadeDestino && nucleosExtraVisiveis.length === 0 ? (
+                        <MenuItem value="__no_nucleo__" disabled>
+                          Não há núcleos disponíveis (sem turmas elegíveis)
                         </MenuItem>
-                      ))}
+                      ) : (
+                        nucleosExtraVisiveis.map((n) => (
+                          <MenuItem key={n} value={n}>
+                            {n}
+                          </MenuItem>
+                        ))
+                      )}
                     </TextField>
 
-                    {extra.modalidadeDestino && !hasAvailable && (
+                    {extra.modalidadeDestino && extraNoOptions && (
                       <Alert severity="warning" sx={{ mt: 1 }}>
                         Não há turmas disponíveis para este aluno nesta modalidade/núcleo como horário extra.
                         Isso pode ocorrer por bloqueios (já matriculado, já escolhido em outra rematrícula,
@@ -768,12 +859,18 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
                       label="Turma extra"
                       margin="normal"
                       value={extra.turmaDestino}
-                      disabled={disableAllFields || !extra.modalidadeDestino || !hasAvailable}
+                      disabled={disableAllFields || !extra.modalidadeDestino}
                       onChange={(e) => handleChangeExtra(index, 'turmaDestino', e.target.value)}
                     >
                       <MenuItem value="">
                         <em>Selecione...</em>
                       </MenuItem>
+
+                      {extraNoOptions && (
+                        <MenuItem value="__no_options__" disabled>
+                          Não há turmas disponíveis para este aluno como horário extra.
+                        </MenuItem>
+                      )}
 
                       {extra.turmaDestino && invalidSelectionNow && (
                         <MenuItem value={extra.turmaDestino} disabled>
@@ -881,7 +978,6 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
               disabled={
                 disableAllFields ||
                 carregandoSubmit ||
-                submittedSuccessfully || // ✅ NOVO: desabilita após sucesso (info)
                 (resposta === 'sim' &&
                   (!modalidadeDestino ||
                     !turmaDestino ||
@@ -900,7 +996,6 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
               )}
             </Button>
 
-            {/* ✅ NOVO: botão para voltar ao portal após sucesso */}
             {submittedSuccessfully && (
               <Button
                 variant="outlined"
@@ -920,9 +1015,10 @@ const RematriculaTokenPage: React.FC<PageProps> = ({
 
 export default RematriculaTokenPage;
 
-// ---------------------------------------------
+
 // getServerSideProps: carrega rematricula, aluno e modalidades
 // + calcula blockedTurmaKeys (SSR)
+// + FILTRA modalidades/turmas para mostrar SOMENTE enabled=true (remove núcleos antigos)
 // ---------------------------------------------
 export const getServerSideProps: GetServerSideProps<PageProps> = async (context) => {
   const token = context.params?.token as string;
@@ -972,7 +1068,8 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (context)
     // Normaliza status: se tem resposta+timestampResposta, considere "respondida" mesmo se status for "pendente"
     const statusRaw = (rem.status || '').toString();
     const respLower = (rem.resposta || '').toString().toLowerCase();
-    const jaTemResposta = (respLower === 'sim' || respLower === 'nao') && !!(rem.timestampResposta || 0);
+    const jaTemResposta =
+      (respLower === 'sim' || respLower === 'nao') && !!(rem.timestampResposta || 0);
 
     const status = statusRaw === 'pendente' && jaTemResposta ? 'respondida' : statusRaw;
 
@@ -985,28 +1082,58 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (context)
         ? 'nao-rematriculado'
         : 'form';
 
-    // 2) Carrega modalidades
+    // 2) Carrega modalidades (estrutura completa) - vamos usar completo para achar aluno e turmas atuais
     const modalidadesSnap = await db.ref('modalidades').once('value');
     const modalidadesVal = modalidadesSnap.val() || {};
 
-    const modalidades: Modalidade[] = Object.entries(modalidadesVal).map(([nome, valor]: any) => ({
-      nome,
-      turmas: valor?.turmas ? (Array.isArray(valor.turmas) ? valor.turmas : Object.values(valor.turmas)) : [],
-    }));
+    // Helper: turmas/alunos podem ser array ou objeto
+    const toArrayMaybe = (val: any): any[] => {
+      if (!val) return [];
+      if (Array.isArray(val)) return val.filter(Boolean);
+      if (typeof val === 'object') return Object.values(val).filter(Boolean);
+      return [];
+    };
 
-    // 3) Encontra o aluno pelo IdentificadorUnico (varre todas as modalidades/turmas)
+    // 3) Carrega rematriculaConfig e monta conjunto de UUIDs habilitados
+    // ✅ Política estrita: só é válido se enabled === true
+    const configSnap = await db.ref(`rematriculaConfig/${anoLetivo}/turmas`).once('value');
+    const configVal = configSnap.val() || {};
+
+    const enabledUuids = new Set<string>(
+      Object.entries(configVal)
+        .filter(([, v]: any) => v?.enabled === true)
+        .map(([uuid]) => String(uuid)),
+    );
+
+    // 4) Monta modalidades PARA UI: SOMENTE turmas enabled === true
+    // ✅ Isso remove turmas antigas e, por consequência, núcleos antigos não aparecem
+    const modalidades: Modalidade[] = Object.entries(modalidadesVal)
+      .map(([nome, valor]: any) => {
+        const turmasArr = toArrayMaybe(valor?.turmas);
+
+        const turmasEnabled = turmasArr.filter((t: any) => {
+          const uuid = String(t?.uuidTurma || '');
+          return uuid && enabledUuids.has(uuid);
+        });
+
+        return {
+          nome,
+          turmas: turmasEnabled,
+        };
+      })
+      .filter((m) => m.turmas && m.turmas.length > 0); // remove modalidades sem turmas habilitadas
+
+    // 5) Encontra o aluno pelo IdentificadorUnico (varre TODAS as modalidades/turmas do banco, inclusive antigas)
     const identificadorUnico = rem.identificadorUnico;
 
     let alunoEncontrado: AlunoFromDB | null = null;
 
     outer: for (const modNome of Object.keys(modalidadesVal)) {
       const mod = modalidadesVal[modNome];
-      const turmasRaw = mod?.turmas || [];
-      const turmasArr: any[] = Array.isArray(turmasRaw) ? turmasRaw : Object.values(turmasRaw);
+      const turmasArr = toArrayMaybe(mod?.turmas);
 
       for (const turma of turmasArr) {
-        const alunosRaw = turma?.alunos || [];
-        const alunosArr: any[] = Array.isArray(alunosRaw) ? alunosRaw : Object.values(alunosRaw);
+        const alunosArr = toArrayMaybe(turma?.alunos);
 
         for (const a of alunosArr) {
           if (a?.informacoesAdicionais?.IdentificadorUnico === identificadorUnico) {
@@ -1040,27 +1167,27 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (context)
     // --- Helpers ---
     const turmaKey = (mod: string, turma: string) => keyOf(mod, turma);
 
-    // 4) Turmas atuais do aluno (todas onde ele está hoje)
+    // 6) Turmas atuais do aluno (todas onde ele está hoje)
     const origemKey = turmaKey(rem.modalidadeOrigem, rem.nomeDaTurmaOrigem);
     const turmasAtuaisKeys = new Set<string>();
 
     for (const modNome of Object.keys(modalidadesVal)) {
       const mod = modalidadesVal[modNome];
-      const turmasRaw = mod?.turmas || [];
-      const turmasArr: any[] = Array.isArray(turmasRaw) ? turmasRaw : Object.values(turmasRaw);
+      const turmasArr = toArrayMaybe(mod?.turmas);
 
       for (const turma of turmasArr) {
-        const alunosRaw = turma?.alunos || [];
-        const alunosArr: any[] = Array.isArray(alunosRaw) ? alunosRaw : Object.values(alunosRaw);
+        const alunosArr = toArrayMaybe(turma?.alunos);
 
-        const found = alunosArr.some((a) => a?.informacoesAdicionais?.IdentificadorUnico === identificadorUnico);
+        const found = alunosArr.some(
+          (a) => a?.informacoesAdicionais?.IdentificadorUnico === identificadorUnico,
+        );
         if (found && turma?.nome_da_turma) {
           turmasAtuaisKeys.add(turmaKey(modNome, turma.nome_da_turma));
         }
       }
     }
 
-    // 5) Turmas reservadas em OUTRAS rematrículas do mesmo aluno (respondida/aplicada)
+    // 7) Turmas reservadas em OUTRAS rematrículas do mesmo aluno (respondida/aplicada)
     const turmasReservadasKeys = new Set<string>();
 
     const allRemSnap = await db.ref(`rematriculas${anoLetivo}`).once('value');
@@ -1098,40 +1225,40 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (context)
       }
     }
 
-    // 6) Turmas desabilitadas pela direção (rematriculaConfig)
+    // 8) Turmas desabilitadas pela direção (política estrita)
+    // ✅ tudo que NÃO estiver enabled===true deve ser considerado indisponível
     const disabledKeys = new Set<string>();
-
-    const configSnap = await db.ref(`rematriculaConfig/${anoLetivo}/turmas`).once('value');
-    const configVal = configSnap.val() || {};
 
     for (const modNome of Object.keys(modalidadesVal)) {
       const mod = modalidadesVal[modNome];
-      const turmasRaw = mod?.turmas || [];
-      const turmasArr: any[] = Array.isArray(turmasRaw) ? turmasRaw : Object.values(turmasRaw);
+      const turmasArr = toArrayMaybe(mod?.turmas);
 
       for (const turma of turmasArr) {
-        const uuidTurma = turma?.uuidTurma;
+        const uuidTurma = String(turma?.uuidTurma || '');
         const nomeDaTurma = turma?.nome_da_turma;
         if (!uuidTurma || !nomeDaTurma) continue;
 
-        const cfg = configVal?.[uuidTurma];
-        if (cfg && cfg.enabled === false) {
+        // estrito: se não está no set enabledUuids, é indisponível
+        if (!enabledUuids.has(uuidTurma)) {
           disabledKeys.add(turmaKey(modNome, nomeDaTurma));
         }
       }
     }
 
-    // 7) Bloqueios
+    // 9) Bloqueios "soft": aluno já está matriculado / já reservado em outra rematrícula
     const softBlocked = new Set<string>();
 
+    // (A) bloqueia todas as turmas atuais EXCETO a origem deste link
     for (const k of turmasAtuaisKeys) {
       if (k !== origemKey) softBlocked.add(k);
     }
+
+    // (B) bloqueia turmas já reservadas em outras rematrículas
     for (const k of turmasReservadasKeys) {
       softBlocked.add(k);
     }
 
-    // 8) Não bloqueia escolhas já feitas NESTA rematrícula (somente soft)
+    // 10) Não bloqueia escolhas já feitas NESTA rematrícula (somente soft)
     const allowThisRem = new Set<string>();
     if (rem.modalidadeDestino && rem.turmaDestino) {
       allowThisRem.add(turmaKey(rem.modalidadeDestino, rem.turmaDestino));
@@ -1147,7 +1274,7 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (context)
       softBlocked.delete(k);
     }
 
-    // 9) União final
+    // 11) União final (soft + disabled)
     const blocked = new Set<string>([...softBlocked, ...disabledKeys]);
 
     return {
@@ -1158,6 +1285,7 @@ export const getServerSideProps: GetServerSideProps<PageProps> = async (context)
         mode,
         rematricula: JSON.parse(JSON.stringify(rem)),
         aluno: JSON.parse(JSON.stringify(alunoEncontrado)),
+        // ✅ modalidades já filtradas: não chegam turmas/núcleos antigos no client
         modalidades: JSON.parse(JSON.stringify(modalidades)),
         blockedTurmaKeys: Array.from(blocked),
       },
