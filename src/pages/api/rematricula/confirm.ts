@@ -40,8 +40,9 @@ type Body = {
 
 type Data = { ok: true } | { error: string };
 
+// ---------------- helpers ----------------
+
 function isValidDbKey(key: string): boolean {
-  // RTDB key NÃO pode conter . # $ [ ] e também não pode conter /
   return !!key && !/[.#$\[\]\/]/.test(key);
 }
 
@@ -54,6 +55,14 @@ function toArrayMaybe(val: any): any[] {
 
 function digitsOnly(v: any): string {
   return String(v ?? '').replace(/\D/g, '');
+}
+
+function normalizeCpf11(v: any): string {
+  const d = digitsOnly(v);
+  if (!d) return '';
+  if (d.length === 11) return d;
+  if (d.length > 11) return d.slice(-11);
+  return d.padStart(11, '0');
 }
 
 function resolveRematriculaKey(tokenOrId: string): string | null {
@@ -70,16 +79,10 @@ function resolveRematriculaKey(tokenOrId: string): string | null {
   }
 }
 
-/**
- * Normaliza data DD/MM/YYYY => YYYYMMDD (string).
- * Se vier qualquer outro formato, tenta extrair dígitos.
- */
-function birthToYYYYMMDD(
-  birthRaw: string,
-): { yyyymmdd: string; dd: string; mm: string; yyyy: string } | null {
+function birthToYYYYMMDD(birthRaw: any): { yyyymmdd: string; dd: string; mm: string; yyyy: string } | null {
   const s = String(birthRaw || '').trim();
 
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (m) {
     const dd = m[1].padStart(2, '0');
     const mm = m[2].padStart(2, '0');
@@ -87,8 +90,22 @@ function birthToYYYYMMDD(
     return { yyyymmdd: `${yyyy}${mm}${dd}`, dd, mm, yyyy };
   }
 
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) {
+    const yyyy = m[1];
+    const mm = m[2];
+    const dd = m[3];
+    return { yyyymmdd: `${yyyy}${mm}${dd}`, dd, mm, yyyy };
+  }
+
   const digits = s.replace(/\D/g, '');
   if (digits.length === 8) {
+    if (digits.startsWith('19') || digits.startsWith('20')) {
+      const yyyy = digits.slice(0, 4);
+      const mm = digits.slice(4, 6);
+      const dd = digits.slice(6, 8);
+      return { yyyymmdd: digits, dd, mm, yyyy };
+    }
     const dd = digits.slice(0, 2);
     const mm = digits.slice(2, 4);
     const yyyy = digits.slice(4, 8);
@@ -98,36 +115,12 @@ function birthToYYYYMMDD(
   return null;
 }
 
-function makeAlunoKeySafe(cpfDigits: string, yyyymmdd: string) {
-  // somente dígitos e underscore
-  return `${cpfDigits}_${yyyymmdd}`;
+function makeAlunoKeySafe(cpfDigits11: string, yyyymmdd: string) {
+  return `${cpfDigits11}_${yyyymmdd}`;
 }
 
-function makeAlunoKeyLegacy(cpfDigits: string, dd: string, mm: string, yyyy: string) {
-  // ATENÇÃO: contém "/" e vai virar path segmentado (apenas para ler locks antigos)
-  return `${cpfDigits}|${dd}/${mm}/${yyyy}`;
-}
-
-function tryParseAlunoKeySafe(alunoKeySafe: string): { cpf: string; dd: string; mm: string; yyyy: string; yyyymmdd: string } | null {
-  const s = String(alunoKeySafe || '').trim();
-  const m = s.match(/^(\d{11})_(\d{8})$/);
-  if (!m) return null;
-  const cpf = m[1];
-  const yyyymmdd = m[2];
-  const yyyy = yyyymmdd.slice(0, 4);
-  const mm = yyyymmdd.slice(4, 6);
-  const dd = yyyymmdd.slice(6, 8);
-  return { cpf, dd, mm, yyyy, yyyymmdd };
-}
-
-function tryParseAlunoKeyRaw(alunoKeyRaw: string): { cpf: string; dd: string; mm: string; yyyy: string } | null {
-  const s = String(alunoKeyRaw || '').trim();
-  // formato esperado: 11digitos|DD/MM/YYYY
-  const m = s.match(/^(\d{11})\|(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (m) {
-    return { cpf: m[1], dd: m[2], mm: m[3], yyyy: m[4] };
-  }
-  return null;
+function makeAlunoKeyLegacy(cpfDigits11: string, dd: string, mm: string, yyyy: string) {
+  return `${cpfDigits11}|${dd}/${mm}/${yyyy}`;
 }
 
 async function resolveTurmaUuid(modalidade: string, nomeDaTurma: string): Promise<string | null> {
@@ -146,67 +139,13 @@ async function isTurmaHabilitadaByUuid(ano: number, uuidTurma: string): Promise<
 }
 
 /**
- * Busca aluno EM QUALQUER turma (varredura global) pelo IdentificadorUnico.
- * Isso corrige o caso em que a turma de origem não tem CPF/DN preenchidos.
- */
-async function getAlunoIdentityFromAnyTurma(
-  identificadorUnico: string,
-): Promise<{
-  cpfDigits: string;
-  birthRaw: string;
-  alunoKeySafe: string;
-  alunoKeyRaw: string;
-  alunoKeyLegacyPath: string;
-} | null> {
-  const modalidadesSnap = await db.ref('modalidades').once('value');
-  const modalidadesVal = modalidadesSnap.val() || {};
-
-  for (const modNome of Object.keys(modalidadesVal || {})) {
-    const mod = modalidadesVal[modNome];
-    const turmasArr = toArrayMaybe(mod?.turmas);
-
-    for (const turma of turmasArr) {
-      const alunosArr = toArrayMaybe(turma?.alunos);
-
-      for (const aluno of alunosArr) {
-        if (aluno?.informacoesAdicionais?.IdentificadorUnico !== identificadorUnico) continue;
-
-        const cpfDigits = digitsOnly(aluno?.informacoesAdicionais?.pagadorMensalidades?.cpf);
-        const birthRaw = String(aluno?.anoNascimento || '').trim();
-        if (!cpfDigits || !birthRaw) continue;
-
-        const parsed = birthToYYYYMMDD(birthRaw);
-        if (!parsed) continue;
-
-        const alunoKeySafe = makeAlunoKeySafe(cpfDigits, parsed.yyyymmdd);
-        const alunoKeyRaw = `${cpfDigits}|${parsed.dd}/${parsed.mm}/${parsed.yyyy}`;
-        const alunoKeyLegacyPath = makeAlunoKeyLegacy(cpfDigits, parsed.dd, parsed.mm, parsed.yyyy);
-
-        if (!isValidDbKey(alunoKeySafe)) continue;
-
-        return { cpfDigits, birthRaw, alunoKeySafe, alunoKeyRaw, alunoKeyLegacyPath };
-      }
-    }
-  }
-
-  return null;
-}
-
-/**
- * Busca aluno na turma de origem desta rematrícula.
- * Mantemos como fallback, mas não é mais a fonte principal.
+ * Fallback antigo: tenta ler identidade na turma de origem (pode falhar se faltam campos naquela turma)
  */
 async function getAlunoIdentityFromOrigem(
   modalidadeOrigem: string,
   nomeDaTurmaOrigem: string,
   identificadorUnico: string,
-): Promise<{
-  cpfDigits: string;
-  birthRaw: string;
-  alunoKeySafe: string;
-  alunoKeyRaw: string;
-  alunoKeyLegacyPath: string;
-} | null> {
+) {
   const turmasSnap = await db.ref(`modalidades/${modalidadeOrigem}/turmas`).once('value');
   const turmasArr = toArrayMaybe(turmasSnap.val());
 
@@ -217,100 +156,38 @@ async function getAlunoIdentityFromOrigem(
   const aluno = alunosArr.find((a) => a?.informacoesAdicionais?.IdentificadorUnico === identificadorUnico);
   if (!aluno) return null;
 
-  const cpfDigits = digitsOnly(aluno?.informacoesAdicionais?.pagadorMensalidades?.cpf);
-  const birthRaw = String(aluno?.anoNascimento || '').trim();
+  const cpfDigits = normalizeCpf11(aluno?.informacoesAdicionais?.pagadorMensalidades?.cpf);
+  const parsed = birthToYYYYMMDD(aluno?.anoNascimento);
 
-  if (!cpfDigits || !birthRaw) return null;
+  if (!cpfDigits || !parsed) return null;
 
-  const parsed = birthToYYYYMMDD(birthRaw);
-  if (!parsed) return null;
-
-  const alunoKeySafe = makeAlunoKeySafe(cpfDigits, parsed.yyyymmdd);
-  const alunoKeyRaw = `${cpfDigits}|${parsed.dd}/${parsed.mm}/${parsed.yyyy}`;
-  const alunoKeyLegacyPath = makeAlunoKeyLegacy(cpfDigits, parsed.dd, parsed.mm, parsed.yyyy);
-
-  if (!isValidDbKey(alunoKeySafe)) return null;
-
-  return { cpfDigits, birthRaw, alunoKeySafe, alunoKeyRaw, alunoKeyLegacyPath };
+  return {
+    cpfDigits,
+    ...parsed,
+  };
 }
 
 /**
- * Resolve identidade do aluno com prioridade:
- * 1) rematrícula já tem alunoKey/alunoKeyRaw (melhor caso)
- * 2) varredura global por IdentificadorUnico
- * 3) fallback turma de origem
+ * ✅ NOVO: obtém identidade direto do REGISTRO DA REMATRÍCULA
+ * (resolve seu caso: aluno aparece em 3 turmas, mas 2 não têm cpf/data completos na turma de origem)
  */
-async function resolveAlunoIdentity(
-  atual: any,
-): Promise<{
-  cpfDigits: string;
-  birthRaw: string;
-  alunoKeySafe: string;
-  alunoKeyRaw: string;
-  alunoKeyLegacyPath: string;
-} | null> {
-  // (1) tentativa via campos já gravados na própria rematrícula
-  const keySafe = String(atual?.alunoKey || '').trim();
-  const keyRaw = String(atual?.alunoKeyRaw || '').trim();
+function getAlunoIdentityFromRem(rem: any) {
+  const cpf = normalizeCpf11(rem?.alunoCpfPagador || rem?.cpfPagador);
+  const parsed =
+    birthToYYYYMMDD(rem?.alunoNascimentoYYYYMMDD) ||
+    birthToYYYYMMDD(rem?.alunoAnoNascimento) ||
+    birthToYYYYMMDD(rem?.alunoDataNascimento) ||
+    birthToYYYYMMDD(rem?.dataNascimento);
 
-  const parsedSafe = keySafe ? tryParseAlunoKeySafe(keySafe) : null;
-  if (parsedSafe) {
-    const alunoKeySafe = makeAlunoKeySafe(parsedSafe.cpf, parsedSafe.yyyymmdd);
-    const alunoKeyRaw = `${parsedSafe.cpf}|${parsedSafe.dd}/${parsedSafe.mm}/${parsedSafe.yyyy}`;
-    const alunoKeyLegacyPath = makeAlunoKeyLegacy(parsedSafe.cpf, parsedSafe.dd, parsedSafe.mm, parsedSafe.yyyy);
+  if (!cpf || !parsed) return null;
 
-    if (isValidDbKey(alunoKeySafe)) {
-      return {
-        cpfDigits: parsedSafe.cpf,
-        birthRaw: `${parsedSafe.dd}/${parsedSafe.mm}/${parsedSafe.yyyy}`,
-        alunoKeySafe,
-        alunoKeyRaw,
-        alunoKeyLegacyPath,
-      };
-    }
-  }
-
-  const parsedRaw = keyRaw ? tryParseAlunoKeyRaw(keyRaw) : null;
-  if (parsedRaw) {
-    const yyyymmdd = `${parsedRaw.yyyy}${parsedRaw.mm}${parsedRaw.dd}`;
-    const alunoKeySafe = makeAlunoKeySafe(parsedRaw.cpf, yyyymmdd);
-    const alunoKeyRaw = `${parsedRaw.cpf}|${parsedRaw.dd}/${parsedRaw.mm}/${parsedRaw.yyyy}`;
-    const alunoKeyLegacyPath = makeAlunoKeyLegacy(parsedRaw.cpf, parsedRaw.dd, parsedRaw.mm, parsedRaw.yyyy);
-
-    if (isValidDbKey(alunoKeySafe)) {
-      return {
-        cpfDigits: parsedRaw.cpf,
-        birthRaw: `${parsedRaw.dd}/${parsedRaw.mm}/${parsedRaw.yyyy}`,
-        alunoKeySafe,
-        alunoKeyRaw,
-        alunoKeyLegacyPath,
-      };
-    }
-  }
-
-  // (2) varredura global por IdentificadorUnico
-  const identificadorUnico = String(atual?.identificadorUnico || '');
-  if (identificadorUnico) {
-    const any = await getAlunoIdentityFromAnyTurma(identificadorUnico);
-    if (any) return any;
-  }
-
-  // (3) fallback turma de origem
-  const modOrigem = String(atual?.modalidadeOrigem || '');
-  const turmaOrigemNome = String(atual?.nomeDaTurmaOrigem || '');
-  if (identificadorUnico && modOrigem && turmaOrigemNome) {
-    const origem = await getAlunoIdentityFromOrigem(modOrigem, turmaOrigemNome, identificadorUnico);
-    if (origem) return origem;
-  }
-
-  return null;
+  return { cpfDigits: cpf, ...parsed };
 }
 
 /**
  * Lock transacional no SAFE path:
- * rematriculaLocks/{ano}/{alunoKeySafe}/{turmaUuid} = rematriculaId
- *
- * E também CHECA lock no LEGACY path (para bloquear dados antigos já gravados com "/").
+ * rematriculaLocks/{ano}/{cpf_yyyymmdd}/{turmaUuid} = rematriculaId
+ * e checa também legado (com /) só para bloquear dados antigos se existirem
  */
 async function claimTurmaLock(
   ano: number,
@@ -320,29 +197,23 @@ async function claimTurmaLock(
   rematriculaId: string,
 ): Promise<boolean> {
   const safeRef = db.ref(`rematriculaLocks/${ano}/${alunoKeySafe}/${turmaUuid}`);
-
-  // legacy (pode virar path segmentado por causa do "/")
   const legacyRef = db.ref(`rematriculaLocks/${ano}/${alunoKeyLegacyPath}/${turmaUuid}`);
 
-  // 1) checa legacy primeiro (se já existe e não é meu => bloqueia)
   const legacySnap = await legacyRef.once('value');
   const legacyVal = legacySnap.val();
   if (legacyVal && String(legacyVal) !== rematriculaId) return false;
 
-  // 2) claim transacional no safe
   const tx = await safeRef.transaction((current) => {
     if (current === null || current === undefined) return rematriculaId;
-    if (String(current) === rematriculaId) return current; // reentrância
+    if (String(current) === rematriculaId) return current;
     return; // abort
   });
 
   if (!tx.committed) return false;
 
-  // 3) pós-checagem legacy (condição de corrida rara)
   const legacySnap2 = await legacyRef.once('value');
   const legacyVal2 = legacySnap2.val();
   if (legacyVal2 && String(legacyVal2) !== rematriculaId) {
-    // rollback do safe
     const safeSnap = await safeRef.once('value');
     if (String(safeSnap.val() || '') === rematriculaId) await safeRef.remove();
     return false;
@@ -351,6 +222,8 @@ async function claimTurmaLock(
   return true;
 }
 
+// ---------------- handler ----------------
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse<Data>) {
   if (req.method !== 'POST') {
     res.setHeader('Allow', ['POST']);
@@ -358,15 +231,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
   }
 
   try {
-    const {
-      token,
-      anoLetivo,
-      resposta,
-      modalidadeDestino,
-      turmaDestino,
-      dadosAtualizados,
-      turmasExtrasDestino,
-    } = req.body as Body;
+    const { token, anoLetivo, resposta, modalidadeDestino, turmaDestino, dadosAtualizados, turmasExtrasDestino } =
+      req.body as Body;
 
     if (!token || (resposta !== 'sim' && resposta !== 'nao')) {
       return res.status(400).json({ error: 'Dados inválidos.' });
@@ -388,7 +254,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
 
     const atual = remSnap.val() as any;
 
-    // trava edição quando já enviou (enquanto pendente)
     if (atual?.timestampResposta) {
       return res.status(400).json({
         error: 'Esta rematrícula já foi enviada e está em análise. Não é possível editar.',
@@ -403,38 +268,44 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     const modOrigem = String(atual?.modalidadeOrigem || '');
     const turmaOrigemNome = String(atual?.nomeDaTurmaOrigem || '');
 
-    if (!identificadorUnico || !modOrigem || !turmaOrigemNome) {
+    if (!modOrigem || !turmaOrigemNome) {
       return res.status(400).json({ error: 'Rematrícula inválida (dados incompletos).' });
     }
 
-    // ✅ NOVO: resolve identidade sem depender da turma de origem
-    const alunoIdentity = await resolveAlunoIdentity(atual);
-    if (!alunoIdentity) {
+    // ✅ pega identidade preferencialmente do próprio registro (salvo no portalLookup)
+    let identity = getAlunoIdentityFromRem(atual);
+
+    // fallback antigo (apenas se precisar)
+    if (!identity && identificadorUnico) {
+      identity = await getAlunoIdentityFromOrigem(modOrigem, turmaOrigemNome, identificadorUnico);
+    }
+
+    if (!identity) {
       return res.status(400).json({
         error:
-          'Não foi possível validar CPF do pagador e data de nascimento do aluno no cadastro. ' +
-          'Verifique se esses campos existem em pelo menos uma turma/matrícula do aluno.',
+          'Não foi possível validar CPF do pagador e data de nascimento do aluno. ' +
+          'Esse aluno provavelmente está sem IdentificadorUnico e/ou sem CPF/data em alguma turma.',
       });
     }
 
-    const { alunoKeySafe, alunoKeyLegacyPath, alunoKeyRaw } = alunoIdentity;
+    const { cpfDigits, yyyymmdd, dd, mm, yyyy } = identity;
 
-    // ✅ backfill (para não falhar na próxima vez)
-    if (String(atual?.alunoKey || '') !== alunoKeySafe || String(atual?.alunoKeyRaw || '') !== alunoKeyRaw) {
-      await remRef.update({
-        alunoKey: alunoKeySafe,
-        alunoKeyRaw,
-      });
-    }
+    const alunoKeySafe = makeAlunoKeySafe(cpfDigits, yyyymmdd);
+    const alunoKeyLegacyPath = makeAlunoKeyLegacy(cpfDigits, dd, mm, yyyy);
 
-    // resposta "nao": só grava
+    // resposta "nao"
     if (resposta === 'nao') {
       await remRef.update({
         resposta: 'nao',
         status: 'pendente',
         timestampResposta: Date.now(),
+
+        // ✅ persistimos identidade
+        alunoCpfPagador: cpfDigits,
+        alunoNascimentoYYYYMMDD: yyyymmdd,
+        alunoAnoNascimento: `${dd}/${mm}/${yyyy}`,
         alunoKey: alunoKeySafe,
-        alunoKeyRaw,
+
         modalidadeDestino: null,
         turmaDestino: null,
         turmaDestinoUuid: null,
@@ -488,14 +359,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       }
     }
 
-    // dedup por UUID (principal + extras)
+    // dedup por UUID
     const chosenUuids = new Set<string>();
     chosenUuids.add(principalUuid);
 
     for (const ex of extrasNormalizados) {
       const u = String(ex.turmaDestinoUuid || '');
       if (!u) continue;
-
       if (chosenUuids.has(u)) {
         return res.status(400).json({
           error: 'Você selecionou a mesma turma mais de uma vez (principal e/ou extras).',
@@ -504,7 +374,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       chosenUuids.add(u);
     }
 
-    // claim locks (SAFE) + checa legacy
+    // claim locks
     for (const uuid of Array.from(chosenUuids)) {
       const ok = await claimTurmaLock(ano, alunoKeySafe, alunoKeyLegacyPath, uuid, rematriculaId);
       if (!ok) {
@@ -515,13 +385,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
       }
     }
 
-    // grava rematrícula
+    // grava
     await remRef.update({
       resposta: 'sim',
       status: 'pendente',
       timestampResposta: Date.now(),
+
+      // ✅ persistimos identidade
+      alunoCpfPagador: cpfDigits,
+      alunoNascimentoYYYYMMDD: yyyymmdd,
+      alunoAnoNascimento: `${dd}/${mm}/${yyyy}`,
       alunoKey: alunoKeySafe,
-      alunoKeyRaw,
 
       modalidadeDestino,
       turmaDestino,
