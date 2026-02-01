@@ -134,7 +134,7 @@ export default function ArquivarAlunos() {
                     <HeaderForm titulo={"Arquivar Alunos"} />
                     <Typography sx={{ color: "black", fontWeight: "bold" }}>
                         Ao arquivar os alunos, eles serão deletados do banco de dados, mas os seus dados serão salvos em uma planilha do Google que pode ser acessada por esse link:<br />
-                        <a href="https://docs.google.com/spreadsheets/d/1RPYA67-ycJAypRlN_GDwNtqpx0sKhyjF7NfDLTbshG8/edit#gid=0">Acessar Planilha de Alunos Arquivados</a>
+                        <a href="https://docs.google.com/spreadsheets/d/12-sp8d0HSalZTwP2lzpZKb2Ww7VCFMTK6OpXWlLsUz4/edit?usp=sharing">Acessar Planilha de Alunos Arquivados</a>
                     </Typography>
                     <br />
                     <Controller
