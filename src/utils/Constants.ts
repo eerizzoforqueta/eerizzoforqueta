@@ -149,218 +149,146 @@ export const opcoesTermosAvisos: OpcoesTermosAvisos = {
   imagem:["Ciente"]
 };
 
-//----------------------------------------------------------------------------------------------
-// src/utils/Constants.ts
+
+
+// ----------------------------------------------------------------------------------------------
+// src/utils/Constants.ts (SEÇÃO PRESENÇAS - versão corrigida)
 
 export interface Presencas {
   [mes: string]: {
-    [data: string]: boolean;
+    [data: string]: boolean; // "DD-MM-YYYY"
   };
 }
 
-interface DiasDaSemanaMap {
-  [dia: string]: number;
+type DiaSemana =
+  | "SEGUNDA"
+  | "TERCA"
+  | "QUARTA"
+  | "QUINTA"
+  | "SEXTA"
+  | "SABADO"
+  | "DOMINGO";
+
+const DIA_TO_NUM: Record<DiaSemana, number> = {
+  DOMINGO: 0,
+  SEGUNDA: 1,
+  TERCA: 2,
+  QUARTA: 3,
+  QUINTA: 4,
+  SEXTA: 5,
+  SABADO: 6,
+};
+
+function normalizeToken(s: string): string {
+  return String(s || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove acentos
+    .toUpperCase()
+    .replace(/[^A-Z]/g, ""); // remove tudo que não for letra
+}
+
+function tokenToDiaSemana(token: string): DiaSemana | null {
+  const t = normalizeToken(token);
+
+  // pega "TERCA", "TERCAFEIRA", "SABADO", etc.
+  if (t.startsWith("SEGUNDA")) return "SEGUNDA";
+  if (t.startsWith("TERCA")) return "TERCA";
+  if (t.startsWith("QUARTA")) return "QUARTA";
+  if (t.startsWith("QUINTA")) return "QUINTA";
+  if (t.startsWith("SEXTA")) return "SEXTA";
+  if (t.startsWith("SABADO")) return "SABADO";
+  if (t.startsWith("DOMINGO")) return "DOMINGO";
+
+  return null;
 }
 
 /**
- * Extrai o dia da semana de um nome de turma que contém algo como
- * "SUB09_AZ_QUARTA_17H30".
- * Se não encontrar, retorna "SEGUNDA" por padrão.
+ * Extrai o dia da semana do nome da turma de forma robusta (acentos, TERCA/TERÇA, SABADO/SÁBADO, TERCA-FEIRA etc).
+ * Se não encontrar, retorna null (não faz fallback silencioso).
  */
-export function extrairDiaDaSemana(nomeDaTurma: string): string {
-  const partes = nomeDaTurma.split("_");
-  const diasValidos = [
-    "SEGUNDA",
-    "TERÇA",
-    "QUARTA",
-    "QUINTA",
-    "SEXTA",
-    "SÁBADO",
-    "DOMINGO",
-  ];
+export function extrairDiaDaSemana(nomeDaTurma: string): DiaSemana | null {
+  const partes = String(nomeDaTurma || "").split("_");
+  for (const p of partes) {
+    const d = tokenToDiaSemana(p);
+    if (d) return d;
+  }
+  return null;
+}
 
-  const diaEncontrado = partes.find((parte) =>
-    diasValidos.includes(parte.toUpperCase())
-  );
-
-  return diaEncontrado?.toUpperCase() || "SEGUNDA";
+function formatKeyDDMMYYYY(dd: number, mm: number, yyyy: number): string {
+  return `${String(dd).padStart(2, "0")}-${String(mm).padStart(2, "0")}-${String(yyyy)}`;
 }
 
 /**
- * Gera uma lista de datas (dd-mm-aaaa) para um determinado diaDaSemana,
- * em um determinado mês e ano.
- * Usado na função gerarPresencasParaAluno (ano corrente / mesAtual).
+ * Gera lista de datas "DD-MM-YYYY" para um dia da semana (0..6) em um mês (1..12) e ano.
+ * Usa UTC para eliminar variações de fuso/DST.
  */
-export function gerarDiasDoMes(
-  ano: number,
-  mes: number,
-  diaDaSemana: number
-): string[] {
-  let datas: string[] = [];
-  let data = new Date(ano, mes - 1, 1);
+export function gerarDiasDoMes(ano: number, mes: number, diaDaSemana: number): string[] {
+  const datas: string[] = [];
+  let d = new Date(Date.UTC(ano, mes - 1, 1));
 
-  // Ajusta para o primeiro "diaDaSemana" do mês
-  while (data.getDay() !== diaDaSemana) {
-    data.setDate(data.getDate() + 1);
+  while (d.getUTCDay() !== diaDaSemana) {
+    d.setUTCDate(d.getUTCDate() + 1);
   }
 
-  // Enquanto ainda estiver no mesmo mês, avança de 7 em 7 dias
-  while (data.getMonth() === mes - 1) {
-    const diaFormatado = `${data.getDate()}-${mes}-${ano}`;
-    datas.push(diaFormatado);
-    data.setDate(data.getDate() + 7);
+  while (d.getUTCMonth() === mes - 1) {
+    datas.push(formatKeyDDMMYYYY(d.getUTCDate(), mes, ano));
+    d.setUTCDate(d.getUTCDate() + 7);
   }
+
   return datas;
 }
 
-/**
- * Gera um objeto de presenças para um aluno, considerando:
- *  - Ano corrente (new Date().getFullYear()).
- *  - Se o mês atual < 7 => gera de janeiro a junho.
- *  - Caso contrário => gera de julho a dezembro.
- */
-export function gerarPresencasParaAluno(diaDaSemana: string): Presencas {
-  const ano = new Date().getFullYear(); // Ano corrente
-  const diasDaSemana: DiasDaSemanaMap = {
-    SEGUNDA: 1,
-    TERÇA: 2,
-    QUARTA: 3,
-    QUINTA: 4,
-    SEXTA: 5,
-    SÁBADO: 6,
-    DOMINGO: 0,
-  };
-
-  let presencas: Presencas = {};
-  const mesAtual = new Date().getMonth() + 1; // 1..12
-
-  if (mesAtual < 7) {
-    // Gera de janeiro(1) a junho(6)
-    for (let mes = 1; mes <= 6; mes++) {
-      const nomeMes = new Date(ano, mes - 1, 1).toLocaleString("pt-BR", {
-        month: "long",
-      });
-      presencas[nomeMes] = {};
-
-      const dias = gerarDiasDoMes(
-        ano,
-        mes,
-        diasDaSemana[diaDaSemana.toUpperCase()]
-      );
-      dias.forEach((data) => {
-        presencas[nomeMes][data] = false;
-      });
-    }
-  } else {
-    // Gera de julho(7) a dezembro(12)
-    for (let mes = 7; mes <= 12; mes++) {
-      const nomeMes = new Date(ano, mes - 1, 1).toLocaleString("pt-BR", {
-        month: "long",
-      });
-      presencas[nomeMes] = {};
-
-      const dias = gerarDiasDoMes(
-        ano,
-        mes,
-        diasDaSemana[diaDaSemana.toUpperCase()]
-      );
-      dias.forEach((data) => {
-        presencas[nomeMes][data] = false;
-      });
-    }
-  }
-
-  return presencas;
+export function gerarDiasDoMesSemestre(ano: number, mes: number, diaDaSemana: number): string[] {
+  // mesma lógica, mantido por compatibilidade com seu código existente
+  return gerarDiasDoMes(ano, mes, diaDaSemana);
 }
 
 /**
- * Gera um objeto de presenças para um aluno, considerando um semestre específico:
- *  - "primeiro": meses jan..jun
- *  - "segundo": meses jul..dez
- * Usa o ano fornecido no parâmetro (ou poderia usar new Date().getFullYear()).
+ * Gera presenças para o semestre (primeiro: jan..jun | segundo: jul..dez) no ano fornecido.
  */
 export function gerarPresencasParaAlunoSemestre(
   diaDaSemana: string,
   semestre: "primeiro" | "segundo",
   ano: number
 ): Presencas {
-  const diasDaSemana: DiasDaSemanaMap = {
-    SEGUNDA: 1,
-    TERÇA: 2,
-    QUARTA: 3,
-    QUINTA: 4,
-    SEXTA: 5,
-    SÁBADO: 6,
-    DOMINGO: 0,
-  };
+  const diaCanon = tokenToDiaSemana(diaDaSemana);
+  if (!diaCanon) {
+    // Falha explícita é melhor que gerar datas erradas
+    throw new Error(`Dia da semana inválido para gerar presenças: "${diaDaSemana}"`);
+  }
 
-  let presencasSemestre: Presencas = {};
+  const mesesPrimeiroSemestre = ["janeiro", "fevereiro", "março", "abril", "maio", "junho"];
+  const mesesSegundoSemestre = ["julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+  const meses = semestre === "primeiro" ? mesesPrimeiroSemestre : mesesSegundoSemestre;
 
-  // Ajuste conforme desejar (ex.: "Janeiro" etc.)
-  const mesesPrimeiroSemestre = [
-    "janeiro",
-    "fevereiro",
-    "março",
-    "abril",
-    "maio",
-    "junho",
-  ];
-  const mesesSegundoSemestre = [
-    "julho",
-    "agosto",
-    "setembro",
-    "outubro",
-    "novembro",
-    "dezembro",
-  ];
-  const meses =
-    semestre === "primeiro" ? mesesPrimeiroSemestre : mesesSegundoSemestre;
+  const presencas: Presencas = {};
 
   meses.forEach((nomeMes, index) => {
-    presencasSemestre[nomeMes] = {};
-    // Ex.: no primeiro semestre, mesIndex = 1..6
-    // no segundo, mesIndex = 7..12
+    presencas[nomeMes] = {};
     const mesIndex = semestre === "primeiro" ? index + 1 : index + 7;
 
-    const dias = gerarDiasDoMesSemestre(
-      ano,
-      mesIndex,
-      diasDaSemana[diaDaSemana.toUpperCase()]
-    );
-    dias.forEach((data) => {
-      presencasSemestre[nomeMes][data] = false;
-    });
+    const dias = gerarDiasDoMesSemestre(ano, mesIndex, DIA_TO_NUM[diaCanon]);
+    dias.forEach((k) => (presencas[nomeMes][k] = false));
   });
 
-  return presencasSemestre;
+  return presencas;
 }
 
 /**
- * Gera datas (dd-mm-aaaa) para um mês específico (1..12), ano e diaDaSemana,
- * no contexto "semestre". Semelhante a gerarDiasDoMes, porém com outro nome
- * para evitar conflitos.
+ * Helper p/ ordenar keys "DD-MM-YYYY" corretamente no front.
  */
-export function gerarDiasDoMesSemestre(
-  ano: number,
-  mes: number,
-  diaDaSemana: number
-): string[] {
-  let datas: string[] = [];
-  let data = new Date(ano, mes - 1, 1);
+export function sortDateKeysDDMMYYYY(a: string, b: string): number {
+  const pa = a.split("-").map(Number);
+  const pb = b.split("-").map(Number);
+  if (pa.length !== 3 || pb.length !== 3) return a.localeCompare(b);
 
-  // Ajusta até achar o primeiro diaDaSemana do mês
-  while (data.getDay() !== diaDaSemana) {
-    data.setDate(data.getDate() + 1);
-  }
+  const [dda, mma, yya] = pa;
+  const [ddb, mmb, yyb] = pb;
 
-  // Avança de 7 em 7 dias até mudar de mês
-  while (data.getMonth() === mes - 1) {
-    const diaFormatado = `${data.getDate()}-${mes}-${ano}`;
-    datas.push(diaFormatado);
-    data.setDate(data.getDate() + 7);
-  }
-
-  return datas;
+  const ta = new Date(yya, mma - 1, dda).getTime();
+  const tb = new Date(yyb, mmb - 1, ddb).getTime();
+  return ta - tb;
 }
 
 

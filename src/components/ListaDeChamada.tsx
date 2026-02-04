@@ -16,6 +16,7 @@ import {
   Button,
   Typography,
 } from "@mui/material";
+import { sortDateKeysDDMMYYYY } from "@/utils/Constants";
 import Table from "@mui/joy/Table";
 import { Aluno, StudentPresenceTableProps } from "@/interface/interfaces";
 import { DataContext } from "@/context/context";
@@ -63,13 +64,10 @@ export const ListaDeChamada: React.FC<StudentPresenceTableProps> = ({
   };
 
   const daysInMonth =
-    alunosDaTurma.length > 0
-      ? Object.keys(
-        alunosDaTurma.find((aluno) => aluno !== null)?.presencas[
-        selectedMonth
-        ] || {}
-      )
-      : [];
+  alunosDaTurma.length > 0 && selectedMonth
+    ? Object.keys(alunosDaTurma.find((a) => a !== null)?.presencas?.[selectedMonth] || {}).sort(sortDateKeysDDMMYYYY)
+    : [];
+
 
   const handleOpenModal = (aluno: Aluno) => {
     setSelectedAluno(aluno);
@@ -221,9 +219,10 @@ export const ListaDeChamada: React.FC<StudentPresenceTableProps> = ({
           >
             {daysInMonth.map((day) => (
               <MenuItem key={day} value={day}>
-                {day}
+                {day.replaceAll("-", "/")}
               </MenuItem>
             ))}
+
           </TextField>
         )}
         <TextField

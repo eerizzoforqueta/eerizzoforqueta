@@ -26,12 +26,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       console.log('Processando turma:', turma.nome_da_turma);
 
       // Extrai o dia da semana a partir do nome da turma
-      const diaDaSemana = extrairDiaDaSemana(turma.nome_da_turma);
-      console.log('Dia da semana extraído:', diaDaSemana);
+     const diaDaSemana = extrairDiaDaSemana(turma.nome_da_turma);
 
-      // Gera presenças para o semestre informado (primeiro: jan..jun ou segundo: jul..dez) para o ano informado
-      const novasPresencas = gerarPresencasParaAlunoSemestre(diaDaSemana, semestre, ano);
+      if (!diaDaSemana) {
+        console.error("Não foi possível extrair dia da semana da turma:", turma.nome_da_turma);
+        continue; // NÃO gera presenças erradas
+      }
 
+      const novasPresencas = gerarPresencasParaAlunoSemestre(diaDaSemana, semestre, Number(ano));
+
+      
       // Busca a turma no Firebase usando o nome_da_turma (normalizado)
       const turmaSnapshot = await db.ref(`modalidades/${modalidade.nome}/turmas`)
         .orderByChild('nome_da_turma')
@@ -50,17 +54,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       // Obtém os alunos da turma como objeto – mesmo se armazenado como array, o Firebase transforma em objeto
       const alunosObj = turmaData[turmaKey].alunos || {};
       console.log('Chaves dos alunos:', Object.keys(alunosObj));
-
+      console.log("Turma:", turma.nome_da_turma, "Dia extraído:", diaDaSemana);
       // Itera sobre todas as chaves dos alunos
       for (const alunoKey of Object.keys(alunosObj)) {
         const aluno = alunosObj[alunoKey];
         if (aluno) {
           console.log('Atualizando presenças para o aluno:', aluno.nome, 'Chave:', alunoKey);
-          await db.ref(`modalidades/${modalidade.nome}/turmas/${turmaKey}/alunos/${alunoKey}`)
-            .update({ presencas: novasPresencas });
+          await db.ref(`modalidades/${modalidade.nome}/turmas/${turmaKey}/alunos/${alunoKey}/presencas`)
+  .set(novasPresencas);
+
         }
       }
     }
+    
     res.status(200).json({ message: "Presenças atualizadas com sucesso!" });
   } catch (error: any) {
     console.error('Erro ao atualizar presenças:', error);
