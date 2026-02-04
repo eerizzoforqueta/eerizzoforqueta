@@ -206,14 +206,33 @@ function tokenToDiaSemana(token: string): DiaSemana | null {
  * Extrai o dia da semana do nome da turma de forma robusta (acentos, TERCA/TERÇA, SABADO/SÁBADO, TERCA-FEIRA etc).
  * Se não encontrar, retorna null (não faz fallback silencioso).
  */
-export function extrairDiaDaSemana(nomeDaTurma: string): DiaSemana | null {
+export function extrairDiaDaSemana(nomeDaTurma: string): string {
   const partes = String(nomeDaTurma || "").split("_");
-  for (const p of partes) {
-    const d = tokenToDiaSemana(p);
-    if (d) return d;
-  }
-  return null;
+
+  const diasValidos = [
+    "SEGUNDA",
+    "TERÇA",
+    "TERCA",
+    "QUARTA",
+    "QUINTA",
+    "SEXTA",
+    "SÁBADO",
+    "SABADO",
+    "DOMINGO",
+  ];
+
+  const diaEncontrado = partes.find((parte) =>
+    diasValidos.includes(parte.toUpperCase())
+  );
+
+  // normaliza TERCA -> TERÇA e SABADO -> SÁBADO (se você estiver usando cedilha)
+  const d = (diaEncontrado?.toUpperCase() || "SEGUNDA")
+    .replace("TERCA", "TERÇA")
+    .replace("SABADO", "SÁBADO");
+
+  return d;
 }
+
 
 function formatKeyDDMMYYYY(dd: number, mm: number, yyyy: number): string {
   return `${String(dd).padStart(2, "0")}-${String(mm).padStart(2, "0")}-${String(yyyy)}`;
