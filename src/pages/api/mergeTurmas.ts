@@ -26,54 +26,25 @@ function norm(v: unknown) {
 }
 
 // RTDB pode vir como array, objeto (com chaves numéricas) ou null
-function toArrayMaybe(val: any): any[] {
+function toArrayMaybe<T = any>(val: any): T[] {
   if (!val) return [];
-  if (Array.isArray(val)) return val.filter(Boolean);
-  if (typeof val === "object") return Object.values(val).filter(Boolean);
+  if (Array.isArray(val)) return (val as T[]).filter(Boolean);
+  if (typeof val === "object") return (Object.values(val) as T[]).filter(Boolean);
   return [];
 }
 
-function listWithKeys(val: any): Array<{ key: string; value: any }> {
-  if (!val) return [];
-  if (Array.isArray(val)) {
-    return val
-      .map((v, i) => ({ key: String(i), value: v }))
-      .filter((x) => x.value);
-  }
-  if (typeof val === "object") {
-    return Object.entries(val)
-      .map(([k, v]) => ({ key: k, value: v }))
-      .filter((x) => x.value);
-  }
-  return [];
-}
-
-function findTurmaByName(turmasVal: any, nomeTurma: string) {
-  const target = norm(nomeTurma);
-  const list = listWithKeys(turmasVal);
-  return (
-    list.find((t) => norm(t.value?.nome_da_turma) === target) || null
-  );
-}
-
-function nextNumericKey(turmasVal: any): string {
-  const list = listWithKeys(turmasVal);
-  const nums = list
-    .map((x) => Number.parseInt(String(x.key), 10))
-    .filter((n) => Number.isFinite(n));
-
-  if (!nums.length) return "0";
-  return String(Math.max(...nums) + 1);
+function removeByNames(turmas: any[], namesToRemove: string[]) {
+  const set = new Set(namesToRemove.map((n) => norm(n)));
+  return (Array.isArray(turmas) ? turmas : [])
+    .filter(Boolean) // ✅ remove null/undefined
+    .filter((t) => !set.has(norm(t?.nome_da_turma)));
 }
 
 function mergePresencas(
   a: Record<string, Record<string, boolean>> = {},
   b: Record<string, Record<string, boolean>> = {}
 ) {
-  const out: Record<string, Record<string, boolean>> = JSON.parse(
-    JSON.stringify(a || {})
-  );
-
+  const out: Record<string, Record<string, boolean>> = JSON.parse(JSON.stringify(a || {}));
   for (const mes of Object.keys(b || {})) {
     out[mes] = out[mes] || {};
     for (const dia of Object.keys(b[mes] || {})) {
@@ -88,8 +59,8 @@ function mergePresencas(
 function dedupeAlunos(alunos: any[]) {
   const map = new Map<string, any>();
 
-  for (const aluno of alunos) {
-    const idu = aluno?.informacoesAdicionais?.IdentificadorUnico?.toString().trim();
+  for (const aluno of alunos.filter(Boolean)) {
+    const idu = aluno?.informacoesAdicionais?.IdentificadorUnico?.toString()?.trim();
     const key =
       idu && idu.length > 0
         ? `IDU#${idu}`
@@ -109,6 +80,11 @@ function dedupeAlunos(alunos: any[]) {
   }
 
   return Array.from(map.values());
+}
+
+function findTurmaInArrayByName(turmasArr: any[], nomeTurma: string) {
+  const target = norm(nomeTurma);
+  return turmasArr.find((t) => norm(t?.nome_da_turma) === target) || null;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -149,36 +125,65 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     const rootRef = admin.database().ref();
-    const modalidadesRef = admin.database().ref("modalidades");
-    const snap = await modalidadesRef.once("value");
+    const snap = await admin.database().ref("modalidades").once("value");
     const modalidades = snap.val() || {};
 
     const modA = modalidades[modalidadeOrigemA];
     const modB = modalidades[modalidadeOrigemB];
     const modDest = modalidades[modalidadeDestino];
 
-    if (!modA?.turmas || !modB?.turmas) {
-      return res.status(404).json({ error: "Turmas de origem não encontradas." });
+    if (!modA || !modB) {
+      return res.status(404).json({ error: "Modalidade(s) de origem não encontrada(s)." });
     }
     if (!modDest) {
       return res.status(404).json({ error: "Modalidade destino não encontrada." });
     }
 
-    const turmaAFound = findTurmaByName(modA.turmas, nomeDaTurmaA);
-    const turmaBFound = findTurmaByName(modB.turmas, nomeDaTurmaB);
+    // ✅ sempre trabalhar com ARRAYS compactados (sem null)
+    const turmasA = toArrayMaybe<any>(modA.turmas);
+    const turmasB = toArrayMaybe<any>(modB.turmas);
+    const turmasDestOriginal = toArrayMaybe<any>(modDest.turmas);
 
-    if (!turmaAFound || !turmaBFound) {
+    const sameOrigin = norm(modalidadeOrigemA) === norm(modalidadeOrigemB);
+
+    const turmaObjA = findTurmaInArrayByName(turmasA, nomeDaTurmaA);
+    const turmaObjB = sameOrigin
+      ? findTurmaInArrayByName(turmasA, nomeDaTurmaB) // mesma lista
+      : findTurmaInArrayByName(turmasB, nomeDaTurmaB);
+
+    if (!turmaObjA || !turmaObjB) {
       return res.status(404).json({ error: "Turma A ou B não encontrada." });
     }
 
-    // Alunos podem ser array OU objeto
-    const alunosA = toArrayMaybe(turmaAFound.value?.alunos);
-    const alunosB = toArrayMaybe(turmaBFound.value?.alunos);
+    const alunosA = toArrayMaybe<any>(turmaObjA?.alunos);
+    const alunosB = toArrayMaybe<any>(turmaObjB?.alunos);
     const mergedAlunos = dedupeAlunos([...alunosA, ...alunosB]);
 
-    // Evitar criar turma duplicada no destino (mesmo nome)
-    const destTurmasArr = toArrayMaybe(modDest?.turmas);
-    const jaExisteNoDestino = destTurmasArr.some(
+    // monta arrays removidos
+    let turmasANew: any[] = [];
+    let turmasBNew: any[] = [];
+
+    if (sameOrigin) {
+      // remove A e B do MESMO array
+      turmasANew = removeByNames(turmasA, [nomeDaTurmaA, nomeDaTurmaB]);
+      turmasBNew = turmasANew; // não será usado, mas mantém coerência
+    } else {
+      turmasANew = removeByNames(turmasA, [nomeDaTurmaA]);
+      turmasBNew = removeByNames(turmasB, [nomeDaTurmaB]);
+    }
+
+    // destino base (importante: se destino é A ou B, usar o array já removido)
+    let turmasDestBase: any[] = [];
+    if (norm(modalidadeDestino) === norm(modalidadeOrigemA)) {
+      turmasDestBase = turmasANew;
+    } else if (norm(modalidadeDestino) === norm(modalidadeOrigemB)) {
+      turmasDestBase = sameOrigin ? turmasANew : turmasBNew;
+    } else {
+      turmasDestBase = turmasDestOriginal;
+    }
+
+    // evita duplicar nome no destino
+    const jaExisteNoDestino = turmasDestBase.some(
       (t) => norm(t?.nome_da_turma) === norm(novaTurma.nome_da_turma)
     );
     if (jaExisteNoDestino) {
@@ -201,23 +206,45 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ],
     };
 
-    // Novo key numérico para compatibilidade com o resto do app
-    const destKey = nextNumericKey(modDest.turmas);
+    const turmasDestNew = [...turmasDestBase.filter(Boolean), newTurmaObj]; // ✅ garante sem null
 
-    // Multi-location update: deletar A/B e criar nova no destino
+    // ✅ updates regravando o ARRAY COMPLETO (sem deletar por índice)
     const updates: Record<string, any> = {};
 
-    updates[`modalidades/${modalidadeOrigemA}/turmas/${turmaAFound.key}`] = null;
-    updates[`modalidades/${modalidadeOrigemB}/turmas/${turmaBFound.key}`] = null;
+    // origem A sempre precisa ser gravada se:
+    // - modalidades diferentes (removemos só de A)
+    // - ou mesmoOrigin e destino NÃO é A (precisa remover as duas)
+    const destIsA = norm(modalidadeDestino) === norm(modalidadeOrigemA);
+    const destIsB = norm(modalidadeDestino) === norm(modalidadeOrigemB);
 
-    updates[`modalidades/${modalidadeDestino}/turmas/${destKey}`] = newTurmaObj;
+    if (sameOrigin) {
+      // se destino é a própria origem, só grava 1 vez no destino (já removido + novo)
+      if (destIsA) {
+        updates[`modalidades/${modalidadeOrigemA}/turmas`] = turmasDestNew;
+      } else {
+        updates[`modalidades/${modalidadeOrigemA}/turmas`] = turmasANew;
+        updates[`modalidades/${modalidadeDestino}/turmas`] = turmasDestNew;
+      }
+    } else {
+      // origens diferentes
+      if (destIsA) {
+        updates[`modalidades/${modalidadeOrigemA}/turmas`] = turmasDestNew; // A removido + novo
+        updates[`modalidades/${modalidadeOrigemB}/turmas`] = turmasBNew;    // B removido
+      } else if (destIsB) {
+        updates[`modalidades/${modalidadeOrigemA}/turmas`] = turmasANew;    // A removido
+        updates[`modalidades/${modalidadeOrigemB}/turmas`] = turmasDestNew; // B removido + novo
+      } else {
+        updates[`modalidades/${modalidadeOrigemA}/turmas`] = turmasANew;
+        updates[`modalidades/${modalidadeOrigemB}/turmas`] = turmasBNew;
+        updates[`modalidades/${modalidadeDestino}/turmas`] = turmasDestNew;
+      }
+    }
 
     await rootRef.update(updates);
 
     return res.status(200).json({
       message: "Turmas fundidas com sucesso.",
       mergedCount: mergedAlunos.length,
-      destinoKey: destKey,
       uuidTurma: newTurmaObj.uuidTurma,
     });
   } catch (error) {
