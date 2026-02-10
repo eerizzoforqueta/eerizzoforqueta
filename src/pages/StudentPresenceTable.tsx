@@ -21,14 +21,18 @@ import { HeaderForm } from "@/components/HeaderDefaultForm";
 import Layout from "@/components/TopBarComponents/Layout";
 import TemporaryStudentRegistration from "@/components/TemporaryStudents/StudentTemporaryModalRegistration";
 
+type GeneroTurma = "masculino" | "feminino";
+
 export default function StudentPresenceTable() {
   const { modalidades, fetchModalidades } = useData();
+
   const { handleSubmit, watch, setValue } = useForm<FormValuesStudent>({
     defaultValues: {
-      modalidade: "", // Iniciar com valor vazio para evitar estado não controlado
+      modalidade: "",
       turmaSelecionada: "",
     },
   });
+
   const [selectedNucleo, setSelectedNucleo] = useState<string>("");
   const [nucleosDisponiveis, setNucleosDisponiveis] = useState<string[]>([]);
   const [turmasDisponiveis, setTurmasDisponiveis] = useState<Turma[]>([]);
@@ -36,56 +40,139 @@ export default function StudentPresenceTable() {
   const [alunosDaTurma, setAlunosDaTurma] = useState<Aluno[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  // Novo: filtro de gênero (apenas futsal)
+  const [selectedGenero, setSelectedGenero] = useState<GeneroTurma>("masculino");
 
   const watchedModalidade = watch("modalidade");
+  const isFutsal =
+    typeof watchedModalidade === "string" &&
+    watchedModalidade.trim().toLowerCase() === "futsal";
+
+  /**
+   * Regra híbrida:
+   * 1) Se turma.isFeminina estiver definido (boolean), ele é a fonte de verdade.
+   * 2) Se estiver ausente, faz fallback por nome contendo "FEMININO" (legado).
+   */
+  const isTurmaFeminina = useCallback((turma: Turma) => {
+    if (typeof turma?.isFeminina === "boolean") return turma.isFeminina;
+
+    const nome = String(turma?.nome_da_turma ?? "");
+    return nome.toUpperCase().includes("FEMININO");
+
+    // Alternativa (se houver variações): includes("FEMININ")
+  }, []);
+
+  const filterTurmasByGenero = useCallback(
+    (turmas: Turma[], genero: GeneroTurma) => {
+      if (!isFutsal) return turmas;
+
+      if (genero === "feminino") {
+        return turmas.filter((t) => isTurmaFeminina(t));
+      }
+
+      // masculino = tudo que NÃO é feminino
+      return turmas.filter((t) => !isTurmaFeminina(t));
+    },
+    [isFutsal, isTurmaFeminina]
+  );
 
   // Carregar modalidades ao montar o componente
   useEffect(() => {
     fetchModalidades().catch(console.error);
   }, [fetchModalidades]);
 
-  // Carregar núcleos disponíveis quando a modalidade é selecionada
+  // Recalcular núcleos quando modalidade OU gênero mudar (gênero só afeta futsal)
   useEffect(() => {
-    if (watchedModalidade) {
-      const turmas = modalidades.find((m) => m.nome === watchedModalidade)?.turmas;
-      if (turmas) {
-        const nucleos = new Set(turmas.map((turma) => turma.nucleo));
-        setNucleosDisponiveis(Array.from(nucleos));
-      } else {
-        setNucleosDisponiveis([]);
-      }
+    if (!watchedModalidade) return;
+
+    const turmasBase =
+      modalidades.find((m) => m.nome === watchedModalidade)?.turmas ?? [];
+
+    const turmasFiltradas = filterTurmasByGenero(turmasBase, selectedGenero);
+
+    const nucleos = new Set(
+      turmasFiltradas
+        .map((turma) => turma.nucleo)
+        .filter((nucleo): nucleo is string => Boolean(nucleo))
+    );
+
+    setNucleosDisponiveis(Array.from(nucleos));
+
+    // Reset seleções dependentes
+    setTurmasDisponiveis([]);
+    setSelectedNucleo("");
+    setSelectedTurma("");
+    setAlunosDaTurma([]);
+    setValue("turmaSelecionada", "");
+  }, [
+    watchedModalidade,
+    modalidades,
+    selectedGenero,
+    filterTurmasByGenero,
+    setValue,
+  ]);
+
+  // Carregar turmas disponíveis quando o núcleo é selecionado (respeitando gênero no futsal)
+  useEffect(() => {
+    if (!selectedNucleo || !watchedModalidade) {
       setTurmasDisponiveis([]);
-      setSelectedNucleo('');
-      setSelectedTurma('');
-      setAlunosDaTurma([]);
+      return;
     }
-  }, [watchedModalidade, modalidades]);
 
-  // Carregar turmas disponíveis quando o núcleo é selecionado
-  useEffect(() => {
-    if (selectedNucleo && watchedModalidade) {
-      const turmasFiltradas = modalidades
-        .find((m) => m.nome === watchedModalidade)
-        ?.turmas.filter((turma) => turma.nucleo === selectedNucleo);
-      setTurmasDisponiveis(turmasFiltradas || []);
-    }
-  }, [selectedNucleo, watchedModalidade, modalidades]);
+    const turmasBase =
+      modalidades.find((m) => m.nome === watchedModalidade)?.turmas ?? [];
 
-  const handleModalidadeChange = useCallback((event: React.ChangeEvent<{ value: unknown }>) => {
-    const value = event.target.value as string;
-    setValue("modalidade", value);
-  }, [setValue]);
+    const turmasPorNucleo = turmasBase.filter(
+      (turma) => turma.nucleo === selectedNucleo
+    );
 
-  const handleNucleoChange = useCallback((event: React.ChangeEvent<{ value: unknown }>) => {
-    const value = event.target.value as string;
-    setSelectedNucleo(value);
-  }, []);
+    const turmasFinal = filterTurmasByGenero(turmasPorNucleo, selectedGenero);
+    setTurmasDisponiveis(turmasFinal);
+  }, [
+    selectedNucleo,
+    watchedModalidade,
+    modalidades,
+    selectedGenero,
+    filterTurmasByGenero,
+  ]);
 
-  const handleTurmaChange = useCallback((event: React.ChangeEvent<{ value: unknown }>) => {
-    const value = event.target.value as string;
-    setSelectedTurma(value);
-    setValue("turmaSelecionada", value);
-  }, [setValue]);
+  const handleModalidadeChange = useCallback(
+    (event: React.ChangeEvent<{ value: unknown }>) => {
+      const value = event.target.value as string;
+      setValue("modalidade", value);
+
+      // Ao mudar modalidade, normaliza gênero default (apenas para futsal)
+      if (value?.trim().toLowerCase() === "futsal") {
+        setSelectedGenero("masculino");
+      }
+    },
+    [setValue]
+  );
+
+  const handleGeneroChange = useCallback(
+    (event: React.ChangeEvent<{ value: unknown }>) => {
+      const value = event.target.value as GeneroTurma;
+      setSelectedGenero(value);
+    },
+    []
+  );
+
+  const handleNucleoChange = useCallback(
+    (event: React.ChangeEvent<{ value: unknown }>) => {
+      const value = event.target.value as string;
+      setSelectedNucleo(value);
+    },
+    []
+  );
+
+  const handleTurmaChange = useCallback(
+    (event: React.ChangeEvent<{ value: unknown }>) => {
+      const value = event.target.value as string;
+      setSelectedTurma(value);
+      setValue("turmaSelecionada", value);
+    },
+    [setValue]
+  );
 
   const handleOpenModal = () => {
     setIsModalOpen(true);
@@ -104,10 +191,12 @@ export default function StudentPresenceTable() {
       setAlunosDaTurma(turmaEscolhida.alunos);
     }
   };
+
   const refreshPage = () => {
     alert("Dados salvos com sucesso");
     window.location.reload();
   };
+
   return (
     <Layout>
       <Container>
@@ -141,6 +230,24 @@ export default function StudentPresenceTable() {
                       ))}
                   </TextField>
                 </Grid>
+
+                {/* Campo para selecionar gênero (apenas futsal) */}
+                {isFutsal && (
+                  <Grid item xs={12} sm={4}>
+                    <TextField
+                      select
+                      label="Gênero"
+                      value={selectedGenero}
+                      onChange={handleGeneroChange}
+                      fullWidth
+                      variant="outlined"
+                      sx={{ marginBottom: 2 }}
+                    >
+                      <MenuItem value="masculino">Masculino</MenuItem>
+                      <MenuItem value="feminino">Feminino</MenuItem>
+                    </TextField>
+                  </Grid>
+                )}
 
                 {/* Campo para selecionar o núcleo */}
                 <Grid item xs={12} sm={4}>
@@ -195,6 +302,7 @@ export default function StudentPresenceTable() {
                 />
               )}
             </List>
+
             <Button
               sx={{ width: "100%", marginBottom: "8px" }}
               type="submit"
@@ -202,6 +310,7 @@ export default function StudentPresenceTable() {
             >
               Pesquisar Turma
             </Button>
+
             <Button
               sx={{ fontSize: "12px" }}
               color="error"
@@ -210,6 +319,7 @@ export default function StudentPresenceTable() {
             >
               Adicionar aluno temporário
             </Button>
+
             <Button
               sx={{ fontSize: "12px", mt: "8px" }}
               color="success"
@@ -220,6 +330,7 @@ export default function StudentPresenceTable() {
             </Button>
           </Box>
         </form>
+
         <Modal
           open={isModalOpen}
           onClose={handleCloseModal}
@@ -233,13 +344,16 @@ export default function StudentPresenceTable() {
   );
 }
 
+
 export const getServerSideProps: GetServerSideProps = async (context) => {
   const session = await getServerSession(context.req, context.res, authOptions);
 
-  // Permitir acesso se o usuário for admin ou professor
+  // Permitir acesso se o usuário for admin, professor ou auxiliar
   if (
     !session ||
-    (session.user.role !== "admin" && session.user.role !== "professor")
+    (session.user.role !== "admin" &&
+      session.user.role !== "professor" &&
+      session.user.role !== "auxiliar")
   ) {
     return {
       redirect: {
@@ -249,6 +363,5 @@ export const getServerSideProps: GetServerSideProps = async (context) => {
     };
   }
 
-  // Retornar props aqui se a permissão for válida
-  return { props: {} }; // Pode retornar props vazias ou adicionais conforme necessário
+  return { props: {} };
 };

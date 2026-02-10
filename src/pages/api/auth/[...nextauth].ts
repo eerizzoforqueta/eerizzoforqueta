@@ -14,13 +14,20 @@ export const authOptions = {
         authorize: async (credentials) => {
           // Implementar a lógica de autenticação aqui
           if (
-            (credentials!.username === "admin" && credentials!.password === "adminpass") ||
-            (credentials!.username === "professor" && credentials!.password === "rizzosports#")
+            (credentials!.username === process.env.ADMIN_LOGIN && credentials!.password === process.env.ADMIN_PASSWORD) ||
+            (credentials!.username === process.env.PROFESSOR_LOGIN && credentials!.password === process.env.PROFESSOR_PASSWORD) ||
+            (credentials!.username== process.env.LOGIN_AUXILIAR && credentials!.password ===process.env.SENHA_AUXILIAR)
           ) {
             return {
               id: credentials!.username,
               name: credentials!.username,
-              role: credentials!.username === "admin" ? "admin" : "professor",
+              role:
+                credentials!.username === "admin"
+                  ? "admin"
+                  : credentials!.username === "auxiliar"
+                  ? "auxiliar"
+                  : "professor",
+              
             };
           }
           return null;
