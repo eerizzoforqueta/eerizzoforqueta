@@ -52,6 +52,9 @@ const FORCED_FUTSAL_NUCLEO = "Leonor Rosa";
 const FORCED_FUTSAL_TURMA =
   "SUB13_SUB15_Leonor Rosa_QUARTA_19h45 - FEMININO";
 
+// Núcleo interno (não deve aparecer no cadastro)
+const HIDDEN_NUCLEO = "INDO MAIS ALÉM";
+
 export default function StudentRegistration() {
   const {
     register,
@@ -107,7 +110,7 @@ export default function StudentRegistration() {
     },
   ]);
 
-  // Novo: checkbox para forçar turma feminina específica
+  // Checkbox para forçar turma feminina específica
   const [forceFutsalFeminino, setForceFutsalFeminino] = useState<boolean>(false);
 
   const forcedSelection = useMemo<SelecaoWithLock>(
@@ -135,9 +138,7 @@ export default function StudentRegistration() {
       const hasLockedForced = prev.some(isForced);
 
       if (forceFutsalFeminino) {
-        const next = prev
-          .filter((s) => !isEmptySelection(s)) // remove linhas vazias para não bloquear required à toa
-          .map((s) => s);
+        const next = prev.filter((s) => !isEmptySelection(s));
 
         if (hasLockedForced) return next;
 
@@ -169,12 +170,13 @@ export default function StudentRegistration() {
       // desmarcado: remove apenas a seleção travada (se existir)
       const cleaned = prev.filter((s) => !isForced(s));
 
-      // garante pelo menos 1 linha editável para o fluxo atual
+      // garante pelo menos 1 linha editável
       if (cleaned.length === 0) {
         return [
           { modalidade: "", nucleo: "", turma: "", turmasDisponiveis: [] },
         ];
       }
+
       return cleaned;
     });
   }, [forceFutsalFeminino, forcedSelection]);
@@ -213,6 +215,14 @@ export default function StudentRegistration() {
           const novaSelecao: SelecaoWithLock = { ...selecao, [campo]: valor };
 
           if (campo === "nucleo") {
+            // Bloqueio adicional (defesa): não permitir núcleo interno via estado
+            if (valor === HIDDEN_NUCLEO) {
+              novaSelecao.nucleo = "";
+              novaSelecao.turma = "";
+              novaSelecao.turmasDisponiveis = [];
+              return novaSelecao;
+            }
+
             const modalidadeSelecionada = novaSelecao.modalidade;
             const turmasFiltradas = atualizarTurmasDisponiveis(
               modalidadeSelecionada,
@@ -236,8 +246,11 @@ export default function StudentRegistration() {
   };
 
   const atualizarTurmasDisponiveis = (modalidade: string, nucleo: string): Turma[] => {
+    // Núcleo interno: nunca disponibiliza turmas no cadastro
+    if (nucleo === HIDDEN_NUCLEO) return [];
+
     const turmas = modalidades.find((m) => m.nome === modalidade)?.turmas ?? [];
-    return turmas.filter((turma) => turma.nucleo === nucleo);
+    return turmas.filter((turma) => turma.nucleo === nucleo && turma.nucleo !== HIDDEN_NUCLEO);
   };
 
   const removerSelecao = (index: number) => {
@@ -316,7 +329,9 @@ export default function StudentRegistration() {
                 modalidades
                   .find((m) => m.nome === selecao.modalidade)
                   ?.turmas.map((turma) => turma.nucleo)
-                  .filter((value, idx, self) => self.indexOf(value) === idx)
+                  .filter((nucleo): nucleo is string => Boolean(nucleo))
+                  .filter((nucleo, idx, self) => self.indexOf(nucleo) === idx)
+                  .filter((nucleo) => nucleo !== HIDDEN_NUCLEO) // <-- remove núcleo interno
                   .map((nucleo) => (
                     <MenuItem key={nucleo} value={nucleo}>
                       {nucleo}
@@ -380,13 +395,15 @@ export default function StudentRegistration() {
       return;
     }
 
-    // Se checkbox marcado, valida (quando possível) se a turma fixa é feminina no dataset
+    // Se checkbox marcado, valida isFeminina quando possível
     if (forceFutsalFeminino) {
       const futsal = modalidades.find((m) => m.nome === FORCED_FUTSAL_MODALIDADE);
       const turma = futsal?.turmas?.find((t) => t.nome_da_turma === FORCED_FUTSAL_TURMA);
 
       if (turma && turma.isFeminina !== true) {
-        alert("Configuração inválida: a turma feminina selecionada não está marcada como isFeminina=true no banco.");
+        alert(
+          "Configuração inválida: a turma feminina selecionada não está marcada como isFeminina=true no banco."
+        );
         return;
       }
     }
@@ -725,11 +742,10 @@ export default function StudentRegistration() {
                       <Checkbox
                         checked={forceFutsalFeminino}
                         onChange={(e) => setForceFutsalFeminino(e.target.checked)}
-                       
                       />
                     }
-                    label="Turma Feminina (Marque essa opção cadastrar em turma feminina de futsal.)"
-                     sx={{color:"black",fontWeight:"bold"}}
+                    label="Turma feminina (Futsal - Leonor Rosa)"
+                    sx={{color:"black"}}
                   />
                 </Grid>
 
@@ -781,11 +797,7 @@ export default function StudentRegistration() {
                     >
                       {label}
                     </Typography>
-                    <RadioGroup
-                      row
-                      aria-labelledby={id}
-                      {...register(id as keyof FormValuesStudent)}
-                    >
+                    <RadioGroup row aria-labelledby={id} {...register(id as keyof FormValuesStudent)}>
                       {opcoesTermosAvisos[id.split(".")[2]].map((opcao, index) => (
                         <FormControlLabel
                           key={index}
