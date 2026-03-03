@@ -17,10 +17,15 @@ const createTurmaSchema = z.object({
   modalidade: z.string().min(1, { message: 'A modalidade é obrigatória.' }),
   nucleo: z.string().min(1, { message: 'O núcleo é obrigatório.' }),
   categoria: z.string().min(1, { message: 'A categoria é obrigatória.' }),
-  capacidade_maxima_da_turma: z.union([z.number(), z.string()]).transform((v) => Number(v)).pipe(z.number().min(1)),
+  capacidade_maxima_da_turma: z
+    .union([z.number(), z.string()])
+    .transform((v) => Number(v))
+    .pipe(z.number().min(1)),
   diaDaSemana: z.string().min(1, { message: 'O dia da semana é obrigatório.' }),
   horario: z.string().min(1, { message: 'O horário é obrigatório.' }),
-  // NOVO: marca turma como feminina (todas as idades)
+  // NOVO: permitir nome custom no CREATE (opcional)
+  nome_da_turma: z.string().min(1).optional(),
+  // marca turma como feminina (todas as idades)
   isFeminina: z.boolean().optional().default(false),
 });
 
@@ -30,7 +35,10 @@ const updateTurmaSchema = z.object({
   modalidade: z.string().min(1, { message: 'A modalidade é obrigatória.' }),
   // os demais campos são opcionais; se não vierem, mantemos o antigo
   nome_da_turma: z.string().min(1).optional(),
-  capacidade_maxima_da_turma: z.union([z.number(), z.string()]).transform((v) => (v === undefined ? undefined : Number(v))).optional(),
+  capacidade_maxima_da_turma: z
+    .union([z.number(), z.string()])
+    .transform((v) => Number(v))
+    .optional(),
   nucleo: z.string().min(1).optional(),
   categoria: z.string().min(1).optional(),
   diaDaSemana: z.string().min(1).optional(),
@@ -75,12 +83,16 @@ async function handlePost(request: NextApiRequest, response: NextApiResponse) {
       capacidade_maxima_da_turma,
       diaDaSemana,
       horario,
+      nome_da_turma,
       isFeminina = false,
     } = createTurmaSchema.parse(request.body);
 
-    // Gera nome no padrão + sufixo FEMININO quando necessário
+    // Nome padrão + sufixo FEMININO quando necessário
     const baseName = `${categoria}_${nucleo}_${diaDaSemana}_${horario}`;
-    const className = isFeminina ? `${baseName} - FEMININO` : baseName;
+    const computedName = isFeminina ? `${baseName} - FEMININO` : baseName;
+
+    // Se veio nome custom, respeita; senão usa o computed
+    const finalName = nome_da_turma?.trim().length ? nome_da_turma.trim() : computedName;
 
     const uuidDaTurma = uuidv4();
 
@@ -90,7 +102,7 @@ async function handlePost(request: NextApiRequest, response: NextApiResponse) {
     const newClassIndex = modalidadeSnapshot.exists() ? modalidadeSnapshot.numChildren() : 0;
 
     const newClass = {
-      nome_da_turma: className,
+      nome_da_turma: finalName,
       modalidade: modalidade,
       nucleo: nucleo,
       categoria: categoria,
@@ -99,10 +111,8 @@ async function handlePost(request: NextApiRequest, response: NextApiResponse) {
       alunos: [],
       uuidTurma: uuidDaTurma,
       contadorAlunos: 0,
-      // NOVOS metadados que você já usa na UI
       diaDaSemana: diaDaSemana,
       horario: horario,
-      // NOVO: flag feminina
       isFeminina: isFeminina,
     };
 
@@ -137,7 +147,6 @@ async function handlePut(request: NextApiRequest, response: NextApiResponse) {
       isFeminina,
     } = updateTurmaSchema.parse(request.body);
 
-    // Localiza a turma pelo uuidTurma (você já usava assim)
     const classReference = database
       .ref(`modalidades/${modalidade}/turmas`)
       .orderByChild('uuidTurma')
@@ -151,9 +160,6 @@ async function handlePut(request: NextApiRequest, response: NextApiResponse) {
     const classKey = Object.keys(snapshot.val())[0];
     const current = snapshot.val()[classKey];
 
-    // Decide o nome final:
-    // - se veio `nome_da_turma`, respeitamos;
-    // - senão, recomputamos com campos (novos ou antigos) + sufixo FEMININO quando aplicável.
     const nextNucleo = nucleo ?? current.nucleo;
     const nextCategoria = categoria ?? current.categoria;
     const nextDia = diaDaSemana ?? current.diaDaSemana;
@@ -163,9 +169,9 @@ async function handlePut(request: NextApiRequest, response: NextApiResponse) {
     const computedBase = `${nextCategoria}_${nextNucleo}_${nextDia}_${nextHora}`;
     const computedName = nextIsFeminina ? `${computedBase} - FEMININO` : computedBase;
 
-    const finalName = nome_da_turma?.trim().length ? nome_da_turma : computedName;
+    const finalName = nome_da_turma?.trim().length ? nome_da_turma.trim() : computedName;
 
-    const updatePayload: Record<string, any> = {
+    const updatePayload: Record<string, unknown> = {
       nome_da_turma: finalName,
       nucleo: nextNucleo,
       categoria: nextCategoria,
@@ -192,7 +198,6 @@ async function handlePut(request: NextApiRequest, response: NextApiResponse) {
 
 /** -----------------------------
  *  DELETE: excluir turma
- *  (regrava o array sem “buracos”)
  *  -----------------------------
  */
 async function handleDelete(request: NextApiRequest, response: NextApiResponse) {
@@ -207,7 +212,7 @@ async function handleDelete(request: NextApiRequest, response: NextApiResponse) 
     }
 
     const turmasData = snapshot.val();
-    let arrayDeTurmas: any[] = Array.isArray(turmasData) ? turmasData : Object.values(turmasData);
+    const arrayDeTurmas: any[] = Array.isArray(turmasData) ? turmasData : Object.values(turmasData);
 
     const novoArrayDeTurmas = arrayDeTurmas.filter((turma) => turma && turma.uuidTurma !== uuidTurma);
 
