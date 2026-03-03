@@ -363,6 +363,7 @@ export default function ManageTurmas() {
                 <FormControlLabel
                   control={<Checkbox name="isFeminina" checked={!!formValues.isFeminina} onChange={handleInputChange} />}
                   label="Turma Feminina (todas as idades)"
+                  sx={{color:"black"}}
                 />
 
                 {capacidadeInvalida && (
@@ -371,7 +372,7 @@ export default function ManageTurmas() {
                   </Typography>
                 )}
 
-                <TextField label="Nome da Turma" value={nomeTurma} onChange={() => {}} fullWidth margin="normal" disabled />
+                <TextField label="Nome da Turma" value={nomeTurma} onChange={() => {}} fullWidth margin="normal"/>
 
                 <Button type="submit" variant="contained" color="primary" disabled={loading || capacidadeInvalida}>
                   Atualizar Turma
