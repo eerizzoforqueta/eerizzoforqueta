@@ -93,6 +93,7 @@ export default function ManageTurmas() {
       'SUB13',
       'SUB14',
       'SUB15_17',
+      'SUB11_SUB13',
       'SUB07_SUB09',
       'SUB09_SUB11',
       'SUB13_SUB15',
