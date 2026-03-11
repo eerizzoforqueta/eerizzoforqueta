@@ -6,6 +6,24 @@ import { DataGrid, GridColDef, GridRenderCellParams } from '@mui/x-data-grid';
 import Layout from '@/components/TopBarComponents/Layout';
 import { authOptions } from './api/auth/[...nextauth]';
 
+const EXACT_CATEGORY_KEYS = [
+  'SUB07',
+  'SUB08',
+  'SUB09',
+  'SUB10',
+  'SUB11',
+  'SUB12',
+  'SUB13',
+  'SUB14',
+  'SUB15_17',
+  'SUB11_SUB13',
+  'SUB07_SUB09',
+  'SUB09_SUB11',
+  'SUB13_SUB15',
+] as const;
+
+type ExactCategoryKey = (typeof EXACT_CATEGORY_KEYS)[number];
+
 interface StatsResponse {
   summary: {
     alunosAtivos: number;
@@ -29,6 +47,7 @@ interface StatsResponse {
     voleiSub13: number;
     voleiSub17: number;
   };
+  exactCategoryCounts: Record<ExactCategoryKey, number>;
   futsalByNucleo: Record<string, number>;
   voleiByNucleo: Record<string, number>;
   archivedCountError: string | null;
@@ -127,12 +146,9 @@ export default function StudentSystemStatsPage() {
         createRow('Vôlei por núcleo', nucleo, valor)
       ),
 
-      createRow('Categorias gerais', 'Alunos da categoria SUB07', stats.categories.sub07),
-      createRow('Categorias gerais', 'Alunos da categoria SUB09', stats.categories.sub09),
-      createRow('Categorias gerais', 'Alunos da categoria SUB11', stats.categories.sub11),
-      createRow('Categorias gerais', 'Alunos da categoria SUB13', stats.categories.sub13),
-      createRow('Categorias gerais', 'Alunos da categoria SUB15', stats.categories.sub15),
-      createRow('Categorias gerais', 'Alunos da categoria SUB17', stats.categories.sub17),
+      ...EXACT_CATEGORY_KEYS.map((categoryKey) =>
+        createRow('Categorias exatas', `Alunos da categoria ${categoryKey}`, stats.exactCategoryCounts[categoryKey] ?? 0)
+      ),
 
       createRow('Categorias do vôlei', 'Vôlei SUB13', stats.categories.voleiSub13),
       createRow('Categorias do vôlei', 'Vôlei SUB17', stats.categories.voleiSub17),
@@ -260,7 +276,6 @@ export default function StudentSystemStatsPage() {
                       sortModel: [{ field: 'grupo', sort: 'asc' }],
                     },
                   }}
-                  
                   sx={{
                     backgroundColor: '#fff',
                     borderRadius: 2,
@@ -278,7 +293,7 @@ export default function StudentSystemStatsPage() {
 export const getServerSideProps: GetServerSideProps = async (context) => {
   const session = await getServerSession(context.req, context.res, authOptions);
 
-  if (!session || (session.user.role !== 'admin')) {
+  if (!session || session.user.role !== 'admin') {
     return {
       redirect: {
         destination: '/NotAllowPage',

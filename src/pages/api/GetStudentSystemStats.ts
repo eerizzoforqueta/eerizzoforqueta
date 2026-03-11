@@ -11,7 +11,24 @@ const ARCHIVED_SHEET_CSV_URL =
 const EXCLUDED_MODALIDADES = new Set(['arquivados', 'excluidos', 'temporarios']);
 const TRACKED_CATEGORY_LABELS = ['SUB07', 'SUB09', 'SUB11', 'SUB13', 'SUB15', 'SUB17'] as const;
 
+const EXACT_CATEGORY_KEYS = [
+  'SUB07',
+  'SUB08',
+  'SUB09',
+  'SUB10',
+  'SUB11',
+  'SUB12',
+  'SUB13',
+  'SUB14',
+  'SUB15_17',
+  'SUB11_SUB13',
+  'SUB07_SUB09',
+  'SUB09_SUB11',
+  'SUB13_SUB15',
+] as const;
+
 type CategoryLabel = (typeof TRACKED_CATEGORY_LABELS)[number];
+type ExactCategoryKey = (typeof EXACT_CATEGORY_KEYS)[number];
 
 interface StudentAdditionalInfoDB {
   IdentificadorUnico?: string;
@@ -47,6 +64,7 @@ interface StudentAccumulator {
   modalitySet: Set<string>;
   nucleiByModalidade: Map<string, Set<string>>;
   categories: Set<string>;
+  exactCategories: Set<string>;
   categoriesByModalidade: Map<string, Set<string>>;
   filhoJBS: boolean;
   filhoMarcopolo: boolean;
@@ -75,6 +93,7 @@ interface StatsResponse {
     voleiSub13: number;
     voleiSub17: number;
   };
+  exactCategoryCounts: Record<ExactCategoryKey, number>;
   futsalByNucleo: Record<string, number>;
   voleiByNucleo: Record<string, number>;
   archivedCountError: string | null;
@@ -87,6 +106,14 @@ function normalizeText(value: string | number | null | undefined): string {
     .replace(/[\u0300-\u036f]/g, '')
     .trim()
     .toLowerCase();
+}
+
+function normalizeCategoryExact(value: string | undefined): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
 }
 
 function toArray<T>(value: T[] | Record<string, T | null> | null | undefined): T[] {
@@ -118,7 +145,7 @@ function getStudentUniqueId(aluno: StudentDB): string {
 }
 
 function extractCategoryLabels(category: string | undefined): Set<string> {
-  const normalized = normalizeText(category).toUpperCase();
+  const normalized = normalizeCategoryExact(category);
   const matches = normalized.match(/\d{2}/g) ?? [];
   return new Set(matches.map((item) => `SUB${item}`));
 }
@@ -168,7 +195,7 @@ export default async function handler(
   }
 
   const session = await getServerSession(request, response, authOptions);
-  if (!session || (session.user.role !== 'admin' && session.user.role !== 'professor')) {
+  if (!session || session.user.role !== 'admin') {
     return response.status(401).json({ message: 'Não autorizado' });
   }
 
@@ -187,6 +214,23 @@ export default async function handler(
       SUB15: new Set<string>(),
       SUB17: new Set<string>(),
     };
+
+    const exactCategoryIds: Record<ExactCategoryKey, Set<string>> = {
+      SUB07: new Set<string>(),
+      SUB08: new Set<string>(),
+      SUB09: new Set<string>(),
+      SUB10: new Set<string>(),
+      SUB11: new Set<string>(),
+      SUB12: new Set<string>(),
+      SUB13: new Set<string>(),
+      SUB14: new Set<string>(),
+      SUB15_17: new Set<string>(),
+      SUB11_SUB13: new Set<string>(),
+      SUB07_SUB09: new Set<string>(),
+      SUB09_SUB11: new Set<string>(),
+      SUB13_SUB15: new Set<string>(),
+    };
+
     const voleiCategoryIds = {
       SUB13: new Set<string>(),
       SUB17: new Set<string>(),
@@ -204,6 +248,7 @@ export default async function handler(
         const alunos = toArray(turma.alunos);
         const nucleo = String(turma.nucleo ?? 'Sem núcleo').trim() || 'Sem núcleo';
         const categoryLabels = extractCategoryLabels(turma.categoria);
+        const exactCategory = normalizeCategoryExact(turma.categoria);
         const turmaKey =
           turma.uuidTurma?.trim() ||
           `${modalidadeNome}__${String(turma.nome_da_turma ?? turma.categoria ?? nucleo)}`;
@@ -218,6 +263,7 @@ export default async function handler(
               modalitySet: new Set<string>(),
               nucleiByModalidade: new Map<string, Set<string>>(),
               categories: new Set<string>(),
+              exactCategories: new Set<string>(),
               categoriesByModalidade: new Map<string, Set<string>>(),
               filhoJBS: false,
               filhoMarcopolo: false,
@@ -240,6 +286,10 @@ export default async function handler(
           for (const label of categoryLabels) {
             accumulator.categories.add(label);
             accumulator.categoriesByModalidade.get(modalidadeNormalized)!.add(label);
+          }
+
+          if (EXACT_CATEGORY_KEYS.includes(exactCategory as ExactCategoryKey)) {
+            accumulator.exactCategories.add(exactCategory);
           }
 
           if (isAffirmative(aluno.informacoesAdicionais?.filhofuncionarioJBS)) {
@@ -294,6 +344,12 @@ export default async function handler(
         }
       }
 
+      for (const exactCategory of accumulator.exactCategories) {
+        if (EXACT_CATEGORY_KEYS.includes(exactCategory as ExactCategoryKey)) {
+          exactCategoryIds[exactCategory as ExactCategoryKey].add(accumulator.id);
+        }
+      }
+
       const voleiLabels = accumulator.categoriesByModalidade.get('volei') ?? new Set<string>();
       if (voleiLabels.has('SUB13')) voleiCategoryIds.SUB13.add(accumulator.id);
       if (voleiLabels.has('SUB17')) voleiCategoryIds.SUB17.add(accumulator.id);
@@ -326,6 +382,21 @@ export default async function handler(
         sub17: categoryIds.SUB17.size,
         voleiSub13: voleiCategoryIds.SUB13.size,
         voleiSub17: voleiCategoryIds.SUB17.size,
+      },
+      exactCategoryCounts: {
+        SUB07: exactCategoryIds.SUB07.size,
+        SUB08: exactCategoryIds.SUB08.size,
+        SUB09: exactCategoryIds.SUB09.size,
+        SUB10: exactCategoryIds.SUB10.size,
+        SUB11: exactCategoryIds.SUB11.size,
+        SUB12: exactCategoryIds.SUB12.size,
+        SUB13: exactCategoryIds.SUB13.size,
+        SUB14: exactCategoryIds.SUB14.size,
+        SUB15_17: exactCategoryIds.SUB15_17.size,
+        SUB11_SUB13: exactCategoryIds.SUB11_SUB13.size,
+        SUB07_SUB09: exactCategoryIds.SUB07_SUB09.size,
+        SUB09_SUB11: exactCategoryIds.SUB09_SUB11.size,
+        SUB13_SUB15: exactCategoryIds.SUB13_SUB15.size,
       },
       futsalByNucleo: Object.fromEntries(
         Object.entries(futsalByNucleoIds).map(([key, value]) => [key, value.size])
