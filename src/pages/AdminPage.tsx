@@ -93,6 +93,8 @@ const drawer = (
         { icon: <AutoDeleteIcon color="error" />, text: 'Arquivar/Deletar alunos', href: '/ArquivarAlunos' },
         { icon: <ChangeCircleIcon color="warning" />, text: 'Trocar Semestre', href: '/MudarSemestre' },
         { icon: <FileDownloadIcon color="success" />, text: 'Criação/Atualização de turmas', href: '/HandleTurmas' },
+         { icon: <GroupAddIcon color="success" />, text: 'Controle Estatístico', href: '/Student-system-stats' },
+        //Student-system-stats
       ].map((item, index) => (
         <React.Fragment key={index}>
           <ListItem disablePadding sx={{ '&:hover': { bgcolor: '#e0e0e0' } }}>
