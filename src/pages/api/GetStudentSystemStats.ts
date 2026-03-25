@@ -34,6 +34,9 @@ interface StudentAdditionalInfoDB {
   IdentificadorUnico?: string;
   filhofuncionarioJBS?: string;
   filhofuncionariomarcopolo?: string;
+  pagadorMensalidades?: {
+    cpf?: string | number;
+  };
 }
 
 interface StudentDB {
@@ -60,8 +63,10 @@ type ModalidadesDB = Record<string, ModalidadeDB | null>;
 
 interface StudentAccumulator {
   id: string;
+  payerCpf: string;
   weeklyEnrollmentKeys: Set<string>;
   modalitySet: Set<string>;
+  modalityEnrollmentCounts: Map<string, number>;
   nucleiByModalidade: Map<string, Set<string>>;
   categories: Set<string>;
   exactCategories: Set<string>;
@@ -74,14 +79,27 @@ interface StatsResponse {
   summary: {
     alunosAtivos: number;
     alunosArquivados: number | null;
-    treinam1x: number;
-    treinam2x: number;
-    treinam3x: number;
+    alunosEm1Turma: number;
+    alunosEm2Turmas: number;
+    alunosEm3Turmas: number;
     futebol: number;
     futsal: number;
     volei: number;
     filhosJBS: number;
     filhosMarcopolo: number;
+  };
+  serviceCounts: {
+    oneXPerWeek: number;
+    twoXPerWeek: number;
+    twoXFutsal: number;
+    twoXVolei: number;
+    oneXFutsalOneXFutebol: number;
+    twoXFutsalOneXFutebol: number;
+    threeXPerWeek: number;
+    twoModalities: number;
+    twoSiblings: number;
+    threeSiblings: number;
+    twoSiblingsThreeX: number;
   };
   categories: {
     sub07: number;
@@ -116,6 +134,10 @@ function normalizeCategoryExact(value: string | undefined): string {
     .toUpperCase();
 }
 
+function normalizeDigits(value: string | number | null | undefined): string {
+  return String(value ?? '').replace(/\D/g, '');
+}
+
 function toArray<T>(value: T[] | Record<string, T | null> | null | undefined): T[] {
   if (!value) return [];
   if (Array.isArray(value)) {
@@ -142,6 +164,11 @@ function getStudentUniqueId(aluno: StudentDB): string {
     .join('__');
 
   return fallback || `fallback__${Math.random().toString(36).slice(2)}`;
+}
+
+function getPayerCpf(aluno: StudentDB): string {
+  const cpf = normalizeDigits(aluno.informacoesAdicionais?.pagadorMensalidades?.cpf);
+  return cpf || getStudentUniqueId(aluno);
 }
 
 function extractCategoryLabels(category: string | undefined): Set<string> {
@@ -185,6 +212,64 @@ async function fetchArchivedCount(): Promise<{ count: number | null; error: stri
   }
 }
 
+function getEnrollmentCount(map: Map<string, number>, key: string): number {
+  return map.get(key) ?? 0;
+}
+
+function getTotalEnrollments(map: Map<string, number>): number {
+  return Array.from(map.values()).reduce((sum, value) => sum + value, 0);
+}
+
+function classifyIndividualService(student: StudentAccumulator):
+  | 'oneXPerWeek'
+  | 'twoXPerWeek'
+  | 'twoXFutsal'
+  | 'twoXVolei'
+  | 'oneXFutsalOneXFutebol'
+  | 'twoXFutsalOneXFutebol'
+  | 'threeXPerWeek'
+  | 'twoModalities' {
+  const total = getTotalEnrollments(student.modalityEnrollmentCounts);
+  const futsal = getEnrollmentCount(student.modalityEnrollmentCounts, 'futsal');
+  const futebol = getEnrollmentCount(student.modalityEnrollmentCounts, 'futebol');
+  const volei = getEnrollmentCount(student.modalityEnrollmentCounts, 'volei');
+  const modalityCount = Array.from(student.modalityEnrollmentCounts.values()).filter((v) => v > 0).length;
+
+  if (futsal === 2 && futebol === 1 && total === 3) {
+    return 'twoXFutsalOneXFutebol';
+  }
+
+  if (futsal === 1 && futebol === 1 && total === 2) {
+    return 'oneXFutsalOneXFutebol';
+  }
+
+  if (futsal === 2 && total === 2 && modalityCount === 1) {
+    return 'twoXFutsal';
+  }
+
+  if (volei === 2 && total === 2 && modalityCount === 1) {
+    return 'twoXVolei';
+  }
+
+  if (total === 1) {
+    return 'oneXPerWeek';
+  }
+
+  if (total === 3 && modalityCount === 1) {
+    return 'threeXPerWeek';
+  }
+
+  if (modalityCount >= 2) {
+    return 'twoModalities';
+  }
+
+  if (total === 2) {
+    return 'twoXPerWeek';
+  }
+
+  return 'threeXPerWeek';
+}
+
 export default async function handler(
   request: NextApiRequest,
   response: NextApiResponse<StatsResponse | { message: string }>
@@ -206,6 +291,7 @@ export default async function handler(
     const students = new Map<string, StudentAccumulator>();
     const futsalByNucleoIds: Record<string, Set<string>> = {};
     const voleiByNucleoIds: Record<string, Set<string>> = {};
+
     const categoryIds: Record<CategoryLabel, Set<string>> = {
       SUB07: new Set<string>(),
       SUB09: new Set<string>(),
@@ -255,12 +341,15 @@ export default async function handler(
 
         for (const aluno of alunos) {
           const studentId = getStudentUniqueId(aluno);
+          const payerCpf = getPayerCpf(aluno);
 
           if (!students.has(studentId)) {
             students.set(studentId, {
               id: studentId,
+              payerCpf,
               weeklyEnrollmentKeys: new Set<string>(),
               modalitySet: new Set<string>(),
+              modalityEnrollmentCounts: new Map<string, number>(),
               nucleiByModalidade: new Map<string, Set<string>>(),
               categories: new Set<string>(),
               exactCategories: new Set<string>(),
@@ -273,6 +362,12 @@ export default async function handler(
           const accumulator = students.get(studentId)!;
           accumulator.weeklyEnrollmentKeys.add(turmaKey);
           accumulator.modalitySet.add(modalidadeNormalized);
+          accumulator.payerCpf = accumulator.payerCpf || payerCpf;
+
+          accumulator.modalityEnrollmentCounts.set(
+            modalidadeNormalized,
+            (accumulator.modalityEnrollmentCounts.get(modalidadeNormalized) ?? 0) + 1
+          );
 
           if (!accumulator.nucleiByModalidade.has(modalidadeNormalized)) {
             accumulator.nucleiByModalidade.set(modalidadeNormalized, new Set<string>());
@@ -302,21 +397,35 @@ export default async function handler(
       }
     }
 
-    let treinam1x = 0;
-    let treinam2x = 0;
-    let treinam3x = 0;
+    let alunosEm1Turma = 0;
+    let alunosEm2Turmas = 0;
+    let alunosEm3Turmas = 0;
     let futebol = 0;
     let futsal = 0;
     let volei = 0;
     let filhosJBS = 0;
     let filhosMarcopolo = 0;
 
+    const serviceCounts: StatsResponse['serviceCounts'] = {
+      oneXPerWeek: 0,
+      twoXPerWeek: 0,
+      twoXFutsal: 0,
+      twoXVolei: 0,
+      oneXFutsalOneXFutebol: 0,
+      twoXFutsalOneXFutebol: 0,
+      threeXPerWeek: 0,
+      twoModalities: 0,
+      twoSiblings: 0,
+      threeSiblings: 0,
+      twoSiblingsThreeX: 0,
+    };
+
     for (const accumulator of students.values()) {
       const frequency = accumulator.weeklyEnrollmentKeys.size;
 
-      if (frequency === 1) treinam1x += 1;
-      if (frequency === 2) treinam2x += 1;
-      if (frequency === 3) treinam3x += 1;
+      if (frequency === 1) alunosEm1Turma += 1;
+      if (frequency === 2) alunosEm2Turmas += 1;
+      if (frequency >= 3) alunosEm3Turmas += 1;
 
       if (accumulator.modalitySet.has('futebol')) {
         futebol += 1;
@@ -358,21 +467,59 @@ export default async function handler(
       if (accumulator.filhoMarcopolo) filhosMarcopolo += 1;
     }
 
+    const families = new Map<string, StudentAccumulator[]>();
+    for (const student of students.values()) {
+      const key = student.payerCpf || student.id;
+      if (!families.has(key)) {
+        families.set(key, []);
+      }
+      families.get(key)!.push(student);
+    }
+
+    for (const familyStudents of families.values()) {
+      const totals = familyStudents.map((student) => getTotalEnrollments(student.modalityEnrollmentCounts));
+      const allOneX = familyStudents.every((student) => getTotalEnrollments(student.modalityEnrollmentCounts) === 1);
+      const allThreeX = familyStudents.every((student) => getTotalEnrollments(student.modalityEnrollmentCounts) === 3);
+
+      if (familyStudents.length === 2 && allOneX) {
+        serviceCounts.twoSiblings += 1;
+        continue;
+      }
+
+      if (familyStudents.length === 3 && allOneX) {
+        serviceCounts.threeSiblings += 1;
+        continue;
+      }
+
+      if (familyStudents.length === 2 && allThreeX) {
+        serviceCounts.twoSiblingsThreeX += 1;
+        continue;
+      }
+
+      for (const student of familyStudents) {
+        const classification = classifyIndividualService(student);
+        serviceCounts[classification] += 1;
+      }
+
+      void totals;
+    }
+
     const archived = await fetchArchivedCount();
 
     const payload: StatsResponse = {
       summary: {
         alunosAtivos: students.size,
         alunosArquivados: archived.count,
-        treinam1x,
-        treinam2x,
-        treinam3x,
+        alunosEm1Turma,
+        alunosEm2Turmas,
+        alunosEm3Turmas,
         futebol,
         futsal,
         volei,
         filhosJBS,
         filhosMarcopolo,
       },
+      serviceCounts,
       categories: {
         sub07: categoryIds.SUB07.size,
         sub09: categoryIds.SUB09.size,

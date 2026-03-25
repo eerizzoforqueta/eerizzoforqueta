@@ -28,14 +28,27 @@ interface StatsResponse {
   summary: {
     alunosAtivos: number;
     alunosArquivados: number | null;
-    treinam1x: number;
-    treinam2x: number;
-    treinam3x: number;
+    alunosEm1Turma: number;
+    alunosEm2Turmas: number;
+    alunosEm3Turmas: number;
     futebol: number;
     futsal: number;
     volei: number;
     filhosJBS: number;
     filhosMarcopolo: number;
+  };
+  serviceCounts: {
+    oneXPerWeek: number;
+    twoXPerWeek: number;
+    twoXFutsal: number;
+    twoXVolei: number;
+    oneXFutsalOneXFutebol: number;
+    twoXFutsalOneXFutebol: number;
+    threeXPerWeek: number;
+    twoModalities: number;
+    twoSiblings: number;
+    threeSiblings: number;
+    twoSiblingsThreeX: number;
   };
   categories: {
     sub07: number;
@@ -131,9 +144,33 @@ export default function StudentSystemStatsPage() {
         stats.summary.alunosArquivados === null ? 'Indisponível' : stats.summary.alunosArquivados
       ),
 
-      createRow('Frequência semanal', 'Treinam 1x na semana', stats.summary.treinam1x),
-      createRow('Frequência semanal', 'Treinam 2x na semana', stats.summary.treinam2x),
-      createRow('Frequência semanal', 'Treinam 3x na semana', stats.summary.treinam3x),
+      createRow('Operacional', 'Alunos matriculados em 1 turma', stats.summary.alunosEm1Turma),
+      createRow('Operacional', 'Alunos matriculados em 2 turmas', stats.summary.alunosEm2Turmas),
+      createRow('Operacional', 'Alunos matriculados em 3 ou mais turmas', stats.summary.alunosEm3Turmas),
+
+      createRow('Serviços financeiros', '1x por semana', stats.serviceCounts.oneXPerWeek),
+      createRow('Serviços financeiros', '2x por semana', stats.serviceCounts.twoXPerWeek),
+      createRow('Serviços financeiros', '2x Futsal', stats.serviceCounts.twoXFutsal),
+      createRow('Serviços financeiros', '2x Vôlei', stats.serviceCounts.twoXVolei),
+      createRow(
+        'Serviços financeiros',
+        '1x Futsal + 1x Futebol',
+        stats.serviceCounts.oneXFutsalOneXFutebol
+      ),
+      createRow(
+        'Serviços financeiros',
+        '2x Futsal + 1x Futebol',
+        stats.serviceCounts.twoXFutsalOneXFutebol
+      ),
+      createRow('Serviços financeiros', '3x por semana', stats.serviceCounts.threeXPerWeek),
+      createRow('Serviços financeiros', 'Duas modalidades', stats.serviceCounts.twoModalities),
+      createRow('Serviços financeiros', '2 irmãos', stats.serviceCounts.twoSiblings),
+      createRow('Serviços financeiros', '3 irmãos', stats.serviceCounts.threeSiblings),
+      createRow(
+        'Serviços financeiros',
+        '2 irmãos 3x semana',
+        stats.serviceCounts.twoSiblingsThreeX
+      ),
 
       createRow('Modalidades', 'Alunos que treinam futebol', stats.summary.futebol),
       createRow('Modalidades', 'Alunos que treinam futsal', stats.summary.futsal),
@@ -147,7 +184,11 @@ export default function StudentSystemStatsPage() {
       ),
 
       ...EXACT_CATEGORY_KEYS.map((categoryKey) =>
-        createRow('Categorias exatas', `Alunos da categoria ${categoryKey}`, stats.exactCategoryCounts[categoryKey] ?? 0)
+        createRow(
+          'Categorias exatas',
+          `Alunos da categoria ${categoryKey}`,
+          stats.exactCategoryCounts[categoryKey] ?? 0
+        )
       ),
 
       createRow('Categorias do vôlei', 'Vôlei SUB13', stats.categories.voleiSub13),
@@ -214,7 +255,7 @@ export default function StudentSystemStatsPage() {
                 Estatísticas de Alunos
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Indicadores consolidados de alunos ativos, arquivados, modalidades, núcleos e categorias.
+                Indicadores operacionais e financeiros dos alunos ativos.
               </Typography>
             </Box>
 
