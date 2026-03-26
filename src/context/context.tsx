@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-unused-vars */
-// atualizado
 'use client'
+
 import {
   Modalidade,
   FormValuesStudent,
@@ -23,58 +23,57 @@ import React, {
   useContext,
   useCallback,
 } from 'react'
+
 interface ChildrenProps {
   children: ReactNode
 }
 
+type SubmitApiResultado = {
+  sucesso: boolean
+  erro?: string
+  aluno?: unknown
+}
+
 interface DataContextType {
   ContextData: FormValuesStudent[]
-  sendDataToApi: (data: FormValuesStudent[]) => Promise<{ resultados: any[] }>
+  sendDataToApi: (data: FormValuesStudent[]) => Promise<{ resultados: SubmitApiResultado[] }>
   updateDataInApi: (data: IIAlunoUpdate) => Promise<void>
-  modalidades: Modalidade[] // Adicione esta linha
-  fetchModalidades: (filtro?: string) => Promise<Modalidade[]> 
+  modalidades: Modalidade[]
+  fetchModalidades: (filtro?: string) => Promise<Modalidade[]>
   fetchStudantsTableData: (filtro?: string, limit?: number, offset?: number) => Promise<Modalidade[]>
   updateAttendanceInApi: (data: AlunoPresencaUpdate) => Promise<void>
   moveStudentTemp: (payload: TemporaryMoveStudentsPayload) => Promise<void>
   copyStudentTemp: (payload: TemporaryMoveStudentsPayload) => Promise<void>
-  updateUniformeInApi: (data: { modalidade: string; nomeDaTurma: string; alunoNome: string; hasUniforme: boolean }) => Promise<void>;
-  deleteStudentFromApi:(payload: DeleteStudants) => Promise<void>
+  updateUniformeInApi: (data: { modalidade: string; nomeDaTurma: string; alunoNome: string; hasUniforme: boolean }) => Promise<void>
+  deleteStudentFromApi: (payload: DeleteStudants) => Promise<void>
   archiveAndDeleteStudent: (aluno: ArchiveAluno) => Promise<void>
-  avisoStudent: (payload: IIAvisos, method: 'POST' | 'PUT' | 'DELETE') => Promise<void>;
+  avisoStudent: (payload: IIAvisos, method: 'POST' | 'PUT' | 'DELETE') => Promise<void>
 }
 
 const DataContext = createContext<DataContextType>({
   ContextData: [],
-  sendDataToApi: async (data: FormValuesStudent[]) => {
-    // simplesmente retorne um objeto vazio ou dados mock
-    return { resultados: [] }
-  },
+  sendDataToApi: async () => ({ resultados: [] }),
   updateDataInApi: async () => {},
   modalidades: [],
-  fetchModalidades: async (filtro?: string): Promise<Modalidade[]> => {
-   // simplesmente retorne um objeto vazio ou dados mock
-    return []
-  },
+  fetchModalidades: async (): Promise<Modalidade[]> => [],
   fetchStudantsTableData: async () => [],
-  updateAttendanceInApi: async (data: AlunoPresencaUpdate) => {},
-  
-  updateUniformeInApi: async (data: { modalidade: string; nomeDaTurma: string; alunoNome: string; hasUniforme: boolean }) => {
-    console.warn('updateUniformeInApi not implemented', data);
+  updateAttendanceInApi: async () => {},
+  updateUniformeInApi: async (data) => {
+    console.warn('updateUniformeInApi not implemented', data)
   },
-  deleteStudentFromApi: async (payload: DeleteStudants) => {
-    console.warn('moveStudentInApi not implemented', payload)
+  deleteStudentFromApi: async (payload) => {
+    console.warn('deleteStudentFromApi not implemented', payload)
   },
-  moveStudentTemp: async (payload: TemporaryMoveStudentsPayload) => {
-    console.warn('moveStudentInApi not implemented', payload)
+  moveStudentTemp: async (payload) => {
+    console.warn('moveStudentTemp not implemented', payload)
   },
-  copyStudentTemp: async (payload: TemporaryMoveStudentsPayload) => {
-    console.warn('moveStudentInApi not implemented', payload)
+  copyStudentTemp: async (payload) => {
+    console.warn('copyStudentTemp not implemented', payload)
   },
-  avisoStudent: async (payload: IIAvisos) => {
-    console.warn('moveStudentInApi not implemented', payload)
+  avisoStudent: async (payload) => {
+    console.warn('avisoStudent not implemented', payload)
   },
   archiveAndDeleteStudent: async () => {}
-
 })
 
 const useData = () => {
@@ -86,43 +85,40 @@ const DataProvider: React.FC<ChildrenProps> = ({ children }) => {
   const [DataStudents, setDataStudents] = useState<FormValuesStudent[]>([])
   const [modalidades, setModalidades] = useState<Modalidade[]>([])
   const [dataTable, setdataTable] = useState<Modalidade[]>([])
-  /// api/GetDataFirebase
-  // -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+  const fetchStudantsTableData = useCallback(
+    async (filtro?: string, limit: number = 10, offset: number = 0): Promise<Modalidade[]> => {
+      try {
+        const url = filtro
+          ? `/api/GetStudantTableData?modalidade=${filtro}&limit=${limit}&offset=${offset}`
+          : `/api/GetStudantTableData?limit=${limit}&offset=${offset}`
 
-  // função para buscar dados para a tabela de forma otimizada
-  const fetchStudantsTableData = useCallback(async (filtro?: string, limit: number = 10, offset: number = 0): Promise<Modalidade[]> => {
-    try {
-      const url = filtro
-        ? `/api/GetStudantTableData?modalidade=${filtro}&limit=${limit}&offset=${offset}`
-        : `/api/GetStudantTableData?limit=${limit}&offset=${offset}`
-      const response = await fetch(url, {
-        headers: {
-          'Cache-Control': 'no-cache'
-        }
-      })
-      if (!response.ok) throw new Error('Falha ao buscar modalidades')
-      const data: ModalidadesData = await response.json()
-      // Convertendo o objeto data para um array de modalidades
-      const modalidadesArray: Modalidade[] = Object.entries(data).map(
-        ([nome, valor]) => ({
-          nome,
-          turmas: (valor as any).turmas as Turma[] // Definindo explicitamente o tipo de valor como Turma[]
+        const response = await fetch(url, {
+          headers: {
+            'Cache-Control': 'no-cache'
+          }
         })
-      )
-      setdataTable(modalidadesArray)
-      return modalidadesArray
-    } catch (error) {
-      console.error('Erro ao buscar modalidades:', error)
-      return []
-    }
-  }, [])
 
+        if (!response.ok) throw new Error('Falha ao buscar modalidades')
 
+        const data: ModalidadesData = await response.json()
 
+        const modalidadesArray: Modalidade[] = Object.entries(data).map(
+          ([nome, valor]) => ({
+            nome,
+            turmas: (valor as any).turmas as Turma[]
+          })
+        )
 
-  // buscar dados da api
-  // Atualizar a função fetchModalidades para aceitar um parâmetro de filtro
+        setdataTable(modalidadesArray)
+        return modalidadesArray
+      } catch (error) {
+        console.error('Erro ao buscar modalidades:', error)
+        return []
+      }
+    },
+    []
+  )
 
   const fetchModalidades = useCallback(
     async (filtro?: string): Promise<Modalidade[]> => {
@@ -130,98 +126,102 @@ const DataProvider: React.FC<ChildrenProps> = ({ children }) => {
         const url = filtro
           ? `/api/GetDataFirebase?modalidade=${filtro}`
           : '/api/GetDataFirebase'
+
         const response = await fetch(url)
+
         if (!response.ok) throw new Error('Falha ao buscar modalidades')
+
         const data: ModalidadesData = await response.json()
-        // Convertendo o objeto data para um array de modalidades
+
         const modalidadesArray: Modalidade[] = Object.entries(data).map(
           ([nome, valor]) => ({
             nome,
             turmas: valor.turmas,
           }),
         )
-        setModalidades(modalidadesArray) // Atualiza o estado com todas as modalidades se necessário
-        return modalidadesArray // Retorna as modalidades filtradas
+
+        setModalidades(modalidadesArray)
+        return modalidadesArray
       } catch (error) {
         console.error('Erro ao buscar modalidades:', error)
-        return [] // Retorna um array vazia em caso de erro
+        return []
       }
     },
     [],
   )
 
-  // -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-  // cadastrar novo estudante
-  
-  const sendDataToApi = async (
-    data: FormValuesStudent[],
-  ): Promise<{ resultados: any[] }> => {
-    try {
-      const responses = await Promise.all(
-        data.map((aluno) => axios.post('/api/SubmitFormRegistration', aluno)),
-      )
-      const combinedResults = responses.flatMap(
-        (response) => response.data.resultados,
-      )
+  const sendDataToApi = useCallback(
+    async (data: FormValuesStudent[]): Promise<{ resultados: SubmitApiResultado[] }> => {
+      try {
+        const payload = Array.isArray(data) ? data : [data]
 
-      return { resultados: combinedResults }
-    } catch (error) {
-      console.error('Ocorreu um erro ao enviar dados para a API:', error)
-      throw new Error('Falha ao enviar dados para a API.')
-    }
-  }
+        const response = await axios.post<{ resultados: SubmitApiResultado[] }>(
+          '/api/SubmitFormRegistration',
+          payload,
+          {
+            timeout: 30000,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          }
+        )
 
-  // -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-  // Atualizar informações do estudante em todas as turmas em que ele está inscrito
-  const updateDataInApi = async (data: IIAlunoUpdate) => {
-  // Garante que o identificador único esteja presente
-  if (!data.informacoesAdicionais.IdentificadorUnico) {
-    console.error("IdentificadorUnico não encontrado no aluno selecionado.");
-    return;
-  }
-
-  const payload = {
-    identificadorUnico: data.informacoesAdicionais.IdentificadorUnico, // chave usada na API
-    novosDados: {
-      anoNascimento: data.anoNascimento,
-      telefoneComWhatsapp: data.telefoneComWhatsapp,
-      nome: data.nome,
-      informacoesAdicionais: data.informacoesAdicionais,
-      foto: data.foto,
+        return {
+          resultados: Array.isArray(response.data?.resultados)
+            ? response.data.resultados
+            : [],
+        }
+      } catch (error) {
+        console.error('Ocorreu um erro ao enviar dados para a API:', error)
+        throw new Error('Falha ao enviar dados para a API.')
+      }
     },
-  };
+    []
+  )
 
-  try {
-    const response = await fetch('/api/updateStudent', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+  const updateDataInApi = async (data: IIAlunoUpdate) => {
+    if (!data.informacoesAdicionais.IdentificadorUnico) {
+      console.error("IdentificadorUnico não encontrado no aluno selecionado.")
+      return
     }
-  } catch (error) {
-    console.error('Erro ao atualizar informações do aluno em todas as turmas:', error);
+
+    const payload = {
+      identificadorUnico: data.informacoesAdicionais.IdentificadorUnico,
+      novosDados: {
+        anoNascimento: data.anoNascimento,
+        telefoneComWhatsapp: data.telefoneComWhatsapp,
+        nome: data.nome,
+        informacoesAdicionais: data.informacoesAdicionais,
+        foto: data.foto,
+      },
+    }
+
+    try {
+      const response = await fetch('/api/updateStudent', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+    } catch (error) {
+      console.error('Erro ao atualizar informações do aluno em todas as turmas:', error)
+    }
   }
-};
 
-
-  // -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-  // atualizar presenças do estudante
   const updateAttendanceInApi = async (data: AlunoPresencaUpdate) => {
     try {
-     
       const payload = {
         modalidade: data.modalidade,
         nomeDaTurma: data.nomeDaTurma,
-        alunoNome: data.nome, 
+        alunoNome: data.nome,
         presencas: data.presencas,
       }
 
-     
       const response = await fetch('/api/updateAttendance', {
         method: 'PUT',
         headers: {
@@ -233,166 +233,150 @@ const DataProvider: React.FC<ChildrenProps> = ({ children }) => {
       if (!response.ok) {
         throw new Error('Falha ao atualizar dados de presença')
       }
-
-     
     } catch (error) {
       console.error('Erro ao atualizar presença:', error)
     }
   }
-  // -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-//Mover aluno de turma
+  const moveStudentTemp = async (payload: TemporaryMoveStudentsPayload) => {
+    try {
+      const response = await fetch('/api/moveTempStudents', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
 
-const moveStudentTemp = async (payload:TemporaryMoveStudentsPayload ) => {
-  try {
-    const response = await fetch('/api/moveTempStudents', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Falha ao mover aluno')
+      }
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Falha ao mover aluno');
+      alert("Aluno movido com sucesso!")
+    } catch (error: any) {
+      console.error('Erro ao mover aluno:', error)
+      alert("Erro ao mover aluno: " + error.message)
     }
-
-    // Assumindo que a API cuida de tudo e apenas retorna sucesso/falha
-    alert("Aluno movido com sucesso!");
-  } catch (error:any) {
-    console.error('Erro ao mover aluno:', error);
-    alert("Erro ao mover aluno: " + error.message);
   }
-}
-//--------------------------------------------------------------------------
-//função para copiar o aluno de uma turma para outra
-const copyStudentTemp = async (payload:TemporaryMoveStudentsPayload ) => {
-  try {
-    const response = await fetch('/api/CopyStudant', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Falha ao mover aluno');
+  const copyStudentTemp = async (payload: TemporaryMoveStudentsPayload) => {
+    try {
+      const response = await fetch('/api/CopyStudant', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Falha ao mover aluno')
+      }
+
+      alert("Aluno movido com sucesso!")
+    } catch (error: any) {
+      console.error('Erro ao mover aluno:', error)
+      alert("Erro ao mover aluno: " + error.message)
     }
-
-    // Assumindo que a API cuida de tudo e apenas retorna sucesso/falha
-    alert("Aluno movido com sucesso!");
-  } catch (error:any) {
-    console.error('Erro ao mover aluno:', error);
-    alert("Erro ao mover aluno: " + error.message);
   }
-}
 
-//----------- função para colocar aviso.
+  const avisoStudent = async (
+    payload: IIAvisos,
+    method: 'POST' | 'PUT' | 'DELETE' = 'POST'
+  ) => {
+    try {
+      const response = await fetch('/api/ApiAvisos', {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
 
-const avisoStudent = async (payload: IIAvisos, method: 'POST' | 'PUT' | 'DELETE' = 'POST') => {
-  try {
-    const response = await fetch('/api/ApiAvisos', {
-      method: method, // Usando o método passado como parâmetro
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Falha ao manipular aviso')
+      }
 
-    if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || 'Falha ao manipular aviso');
+      alert(`Aviso ${method === 'DELETE' ? 'deletado' : 'processado'} com sucesso!`)
+    } catch (error: any) {
+      console.error('Erro ao manipular aviso:', error)
+      alert(`Erro ao manipular aviso: ${error.message}`)
     }
-
-    alert(`Aviso ${method === 'DELETE' ? 'deletado' : 'processado'} com sucesso!`);
-  } catch (error: any) {
-    console.error('Erro ao manipular aviso:', error);
-    alert(`Erro ao manipular aviso: ${error.message}`);
   }
-}
 
-
-
-
-
-
-// ------------------------------------------------------------------
-  // Deletar aluno (APENAS deletar). Importante: alunoId deve ser o IdentificadorUnico!
-  async function deleteStudentFromApi(data: { alunoId: string; modalidade: string; nomeDaTurma: string }) {
+  async function deleteStudentFromApi(data: {
+    alunoId: string
+    modalidade: string
+    nomeDaTurma: string
+  }) {
     if (!data.alunoId || !data.modalidade || !data.nomeDaTurma) {
       throw new Error('Dados incompletos para excluir o aluno.')
     }
-    // ATENÇÃO: seu arquivo da API se chama DeleteStudents.ts -> rota: /api/DeleteStudents
-    // Se preferir /api/deleteStudent, renomeie o arquivo para pages/api/deleteStudent.ts
+
     const response = await fetch('/api/DeleteStudents', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     })
+
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}))
       throw new Error(errorData.error || 'Erro ao excluir o aluno.')
     }
+
     return response.json()
   }
 
-  // ------------------------------------------------------------------
-  // Arquivar no Google Sheets e DEPOIS deletar (endpoint orquestrador)
   const archiveAndDeleteStudent = async (aluno: ArchiveAluno) => {
     const response = await fetch('/api/ArquivarAlunos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(aluno),
     })
+
     const data = await response.json().catch(() => ({}))
+
     if (!response.ok || data?.status !== 'Success') {
       throw new Error(data?.message || 'Falha ao arquivar/deletar o aluno.')
     }
-    // sucesso: a própria API já remove do Realtime Database após gravar na planilha
   }
 
-
-
-
-  // -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-  
-  
-  //Atulizar Campo de uniforme
-  const updateUniformeInApi = async (data: { modalidade: string; nomeDaTurma: string; alunoNome: string; hasUniforme: boolean }) => {
+  const updateUniformeInApi = async (data: {
+    modalidade: string
+    nomeDaTurma: string
+    alunoNome: string
+    hasUniforme: boolean
+  }) => {
     try {
-      // Constrói o corpo da requisição com os dados recebidos
       const payload = {
         modalidade: data.modalidade,
         nomeDaTurma: data.nomeDaTurma,
         alunoNome: data.alunoNome,
         hasUniforme: data.hasUniforme,
-      };
-  
-      // Faz a chamada para a API
+      }
+
       const response = await fetch('/api/updateUniforme', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
-      });
-  
+      })
+
       if (!response.ok) {
-        const errorData = await response.json();
-        console.log( response)
-        throw new Error(errorData.error || 'Falha ao atualizar o status do uniforme');
+        const errorData = await response.json()
+        throw new Error(errorData.error || 'Falha ao atualizar o status do uniforme')
       }
-  
-     
-      console.log('Status do uniforme atualizado com sucesso');
+
+      console.log('Status do uniforme atualizado com sucesso')
     } catch (error) {
-      console.error('Erro ao atualizar o status do uniforme:', error);
+      console.error('Erro ao atualizar o status do uniforme:', error)
     }
-  };
-  // -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+  }
+
   return (
     <DataContext.Provider
       value={{
@@ -404,16 +388,16 @@ const avisoStudent = async (payload: IIAvisos, method: 'POST' | 'PUT' | 'DELETE'
         fetchStudantsTableData,
         updateAttendanceInApi,
         updateUniformeInApi,
-        deleteStudentFromApi, 
+        deleteStudentFromApi,
         moveStudentTemp,
         copyStudentTemp,
         avisoStudent,
-        archiveAndDeleteStudent, 
+        archiveAndDeleteStudent,
       }}
     >
       {children}
     </DataContext.Provider>
-  );
+  )
 }
 
 export { DataContext, DataProvider, useData }
