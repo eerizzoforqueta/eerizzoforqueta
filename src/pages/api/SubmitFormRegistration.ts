@@ -1,4 +1,3 @@
-// src/pages/api/submitForm.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import admin from "../../config/firebaseAdmin";
 import {
@@ -10,23 +9,31 @@ import {
 const db = admin.database();
 
 type ResultadoItem =
-  | { sucesso: true; aluno: any }
-  | { sucesso: false; erro: string; aluno: any };
+  | { sucesso: true; aluno: unknown }
+  | { sucesso: false; erro: string; aluno: unknown };
 
-function safeString(v: any) {
+type TurmaRegistro = {
+  nome_da_turma?: string;
+  capacidade_atual_da_turma?: number;
+  capacidade_maxima_da_turma?: number;
+  contadorAlunos?: number;
+  diaDaSemana?: string;
+};
+
+function safeString(v: unknown): string {
   return String(v ?? "").trim();
 }
 
-function getAnoAtual() {
+function getAnoAtual(): number {
   return new Date().getFullYear();
 }
 
 function getSemestreAtual(): "primeiro" | "segundo" {
-  const mes = new Date().getMonth() + 1; // 1..12
+  const mes = new Date().getMonth() + 1;
   return mes < 7 ? "primeiro" : "segundo";
 }
 
-function nextNumericKey(obj: Record<string, any>): number {
+function nextNumericKey(obj: Record<string, unknown>): number {
   const keys = Object.keys(obj || {});
   let max = 0;
   for (const k of keys) {
@@ -36,44 +43,56 @@ function nextNumericKey(obj: Record<string, any>): number {
   return max + 1;
 }
 
-export default async function submitForm(req: NextApiRequest, res: NextApiResponse) {
+export default async function submitForm(
+  req: NextApiRequest,
+  res: NextApiResponse<{ resultados: ResultadoItem[] } | { message: string }>
+) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
-    return res.status(405).end("Method Not Allowed");
+    return res.status(405).json({ message: "Method Not Allowed" });
   }
 
-  const alunos = Array.isArray(req.body) ? req.body : [req.body];
+  res.setHeader("Cache-Control", "no-store");
+
+  const alunosPayload = Array.isArray(req.body) ? req.body : [req.body];
   const resultados: ResultadoItem[] = [];
 
-  const anoLetivo = getAnoAtual(); // ✅ ano automático
-  const semestre = getSemestreAtual(); // ✅ semestre automático
+  const anoLetivo = getAnoAtual();
+  const semestre = getSemestreAtual();
 
-  for (const alunoData of alunos) {
+  for (const alunoData of alunosPayload) {
     try {
       const modalidade = safeString(alunoData?.modalidade);
       const turmaSelecionada = safeString(alunoData?.turmaSelecionada);
-      const aluno = alunoData?.aluno;
+      const aluno = alunoData?.aluno as Record<string, unknown> | undefined;
 
       if (!modalidade) {
-        resultados.push({ sucesso: false, erro: "Modalidade não fornecida.", aluno });
+        resultados.push({
+          sucesso: false,
+          erro: "Modalidade não fornecida.",
+          aluno,
+        });
         continue;
       }
 
       if (!turmaSelecionada) {
-        resultados.push({ sucesso: false, erro: "Nome da turma não fornecido.", aluno });
+        resultados.push({
+          sucesso: false,
+          erro: "Nome da turma não fornecido.",
+          aluno,
+        });
         continue;
       }
 
       if (!aluno || !safeString(aluno?.nome)) {
-        resultados.push({ sucesso: false, erro: "Dados do aluno inválidos (nome ausente).", aluno });
+        resultados.push({
+          sucesso: false,
+          erro: "Dados do aluno inválidos (nome ausente).",
+          aluno,
+        });
         continue;
       }
 
-      // ✅ Presenças geradas conforme dia da semana da turma + ano atual
-      const diaDaSemana = (extrairDiaDaSemana(turmaSelecionada) ?? "SEGUNDA") as string;
-      aluno.presencas = gerarPresencasParaAlunoSemestre(diaDaSemana, semestre, anoLetivo);
-
-      // 1) achar a turma pelo nome
       const turmaQuery = db
         .ref(`modalidades/${modalidade}/turmas`)
         .orderByChild("nome_da_turma")
@@ -82,16 +101,24 @@ export default async function submitForm(req: NextApiRequest, res: NextApiRespon
       const snapshot = await turmaQuery.once("value");
 
       if (!snapshot.exists()) {
-        resultados.push({ sucesso: false, erro: "Turma não encontrada.", aluno });
+        resultados.push({
+          sucesso: false,
+          erro: "Turma não encontrada.",
+          aluno,
+        });
         continue;
       }
 
-      const turmaData = snapshot.val() || {};
+      const turmaData = snapshot.val() as Record<string, TurmaRegistro>;
       const turmaKey = Object.keys(turmaData)[0];
       const turma = turmaData[turmaKey];
 
       if (!turma) {
-        resultados.push({ sucesso: false, erro: "Turma inválida (registro vazio).", aluno });
+        resultados.push({
+          sucesso: false,
+          erro: "Turma inválida (registro vazio).",
+          aluno,
+        });
         continue;
       }
 
@@ -107,58 +134,84 @@ export default async function submitForm(req: NextApiRequest, res: NextApiRespon
         continue;
       }
 
-      // 2) carregar alunos existentes
+      const diaDaSemana =
+        safeString(turma.diaDaSemana) ||
+        safeString(extrairDiaDaSemana(turma.nome_da_turma ?? "")) ||
+        "SEGUNDA";
+
+      (aluno as Record<string, unknown>).presencas = gerarPresencasParaAlunoSemestre(
+        diaDaSemana,
+        semestre,
+        anoLetivo
+      );
+
       const alunosRef = db.ref(`modalidades/${modalidade}/turmas/${turmaKey}/alunos`);
       const alunosSnapshot = await alunosRef.once("value");
-      const alunosExistem: Record<string, any> = alunosSnapshot.val() || {};
+      const alunosExistem = (alunosSnapshot.val() || {}) as Record<string, Record<string, unknown>>;
 
-      // 3) verificação de duplicidade (prioriza IdentificadorUnico se existir)
-      const idu = safeString(aluno?.informacoesAdicionais?.IdentificadorUnico);
+      const informacoesAdicionais =
+        (aluno.informacoesAdicionais as Record<string, unknown> | undefined) ?? {};
+      const idu = safeString(informacoesAdicionais?.IdentificadorUnico);
 
       if (idu) {
-        const duplicadoPorIdu = Object.values(alunosExistem).some((a: any) => {
-          const otherIdu = safeString(a?.informacoesAdicionais?.IdentificadorUnico);
+        const duplicadoPorIdu = Object.values(alunosExistem).some((a) => {
+          const info = (a?.informacoesAdicionais as Record<string, unknown> | undefined) ?? {};
+          const otherIdu = safeString(info?.IdentificadorUnico);
           return otherIdu && otherIdu === idu;
         });
 
         if (duplicadoPorIdu) {
-          resultados.push({ sucesso: false, erro: "Aluno já cadastrado nesta turma (IdentificadorUnico).", aluno });
+          resultados.push({
+            sucesso: false,
+            erro: "Aluno já cadastrado nesta turma (IdentificadorUnico).",
+            aluno,
+          });
           continue;
         }
       } else {
-        // fallback: nome + nascimento
-        const nomeAlunoNormalizado = normalizeName(aluno.nome);
-        const nascNorm = normalizeName(aluno.anoNascimento);
+        const nomeAlunoNormalizado = normalizeName(safeString(aluno.nome));
+        const nascNorm = normalizeName(safeString(aluno.anoNascimento));
 
-        const duplicadoPorNome = Object.values(alunosExistem).some((alunoExistente: any) => {
-          const nomeExistenteNormalizado = normalizeName(alunoExistente?.nome);
-          const nascExist = normalizeName(alunoExistente?.anoNascimento);
-          return nomeExistenteNormalizado === nomeAlunoNormalizado && nascExist === nascNorm;
+        const duplicadoPorNome = Object.values(alunosExistem).some((alunoExistente) => {
+          const nomeExistenteNormalizado = normalizeName(safeString(alunoExistente?.nome));
+          const nascExist = normalizeName(safeString(alunoExistente?.anoNascimento));
+          return (
+            nomeExistenteNormalizado === nomeAlunoNormalizado &&
+            nascExist === nascNorm
+          );
         });
 
         if (duplicadoPorNome) {
-          resultados.push({ sucesso: false, erro: "Aluno já cadastrado nesta turma.", aluno });
+          resultados.push({
+            sucesso: false,
+            erro: "Aluno já cadastrado nesta turma.",
+            aluno,
+          });
           continue;
         }
       }
 
-      // 4) novo id numérico seguro
       const novoIdAluno = nextNumericKey(alunosExistem);
-      aluno.id = novoIdAluno;
+      (aluno as Record<string, unknown>).id = novoIdAluno;
 
-      // 5) grava aluno e atualiza contadores
-      await alunosRef.child(String(novoIdAluno)).set(aluno);
+      const updates: Record<string, unknown> = {};
+      updates[`modalidades/${modalidade}/turmas/${turmaKey}/alunos/${novoIdAluno}`] = aluno;
+      updates[`modalidades/${modalidade}/turmas/${turmaKey}/capacidade_atual_da_turma`] = capAtual + 1;
+      updates[`modalidades/${modalidade}/turmas/${turmaKey}/contadorAlunos`] = Math.max(
+        Number(turma.contadorAlunos ?? 0),
+        novoIdAluno
+      );
 
-      await db.ref(`modalidades/${modalidade}/turmas/${turmaKey}`).update({
-        capacidade_atual_da_turma: capAtual + 1,
-        contadorAlunos: novoIdAluno,
-      });
+      await db.ref().update(updates);
 
       resultados.push({ sucesso: true, aluno });
-    } catch (err: any) {
+    } catch (err: unknown) {
       resultados.push({
         sucesso: false,
-        erro: err?.message || String(err) || "Erro inesperado ao cadastrar aluno.",
+        erro:
+          err instanceof Error
+            ? err.message
+            : "Erro inesperado ao cadastrar aluno.",
         aluno: alunoData?.aluno,
       });
     }

@@ -18,6 +18,7 @@ import {
   vinculosempresasparceiras,
 } from "@/utils/Constants";
 import {
+  Alert,
   Box,
   Button,
   Checkbox,
@@ -42,18 +43,85 @@ import { storage } from "../config/firestoreConfig";
 import resizeImage from "../utils/Constants";
 import { v4 as uuidv4 } from "uuid";
 import { zodResolver } from "@hookform/resolvers/zod";
-import axios from "axios";
+import axios, { AxiosError } from "axios";
 import { CorrigirDadosDefinitivos } from "@/utils/CorrigirDadosTurmasEmComponetes";
 
 type SelecaoWithLock = SelecaoModalidadeTurma & { locked?: boolean };
+
+type ResultadoApi =
+  | { sucesso: true; aluno: unknown }
+  | { sucesso: false; erro: string; aluno: unknown };
+
+type SubmitResponse = {
+  resultados: ResultadoApi[];
+};
 
 const FORCED_FUTSAL_MODALIDADE = "futsal";
 const FORCED_FUTSAL_NUCLEO = "Leonor Rosa";
 const FORCED_FUTSAL_TURMA =
   "SUB13_SUB15_Leonor Rosa_QUARTA_19h45 - FEMININO";
 
-// Núcleo interno (não deve aparecer no cadastro)
 const HIDDEN_NUCLEO = "INDO MAIS ALÉM";
+const SUBMIT_TIMEOUT_MS = 30000;
+const UPLOAD_TIMEOUT_MS = 45000;
+
+function getAxiosErrorMessage(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    const axiosError = error as AxiosError<{ message?: string }>;
+    if (axiosError.code === "ECONNABORTED") {
+      return "Tempo excedido ao enviar o cadastro. Tente novamente.";
+    }
+    if (axiosError.response?.data?.message) {
+      return axiosError.response.data.message;
+    }
+    if (axiosError.message) {
+      return axiosError.message;
+    }
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return "Erro inesperado ao enviar o cadastro.";
+}
+
+async function uploadFileWithTimeout(file: File, onProgress: (progress: number) => void): Promise<string> {
+  const fileName = `${uuidv4()}_${file.name}`;
+  const fileRef = ref(storage, fileName);
+  const uploadTask = uploadBytesResumable(fileRef, file);
+
+  return await new Promise<string>((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      uploadTask.cancel();
+      reject(new Error("Tempo excedido no upload da foto. Tente novamente."));
+    }, UPLOAD_TIMEOUT_MS);
+
+    uploadTask.on(
+      "state_changed",
+      (snapshot) => {
+        const progress = Math.round(
+          (snapshot.bytesTransferred / snapshot.totalBytes) * 100
+        );
+        onProgress(progress);
+      },
+      (error) => {
+        window.clearTimeout(timeoutId);
+        reject(error);
+      },
+      async () => {
+        try {
+          const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+          window.clearTimeout(timeoutId);
+          resolve(downloadURL);
+        } catch (error) {
+          window.clearTimeout(timeoutId);
+          reject(error);
+        }
+      }
+    );
+  });
+}
 
 export default function StudentRegistration() {
   const {
@@ -74,33 +142,35 @@ export default function StudentRegistration() {
     },
   });
 
-  const { modalidades, fetchModalidades, sendDataToApi } = useData();
+  const { modalidades, fetchModalidades } = useData();
 
-  // upload de imagem----------------------------
   const [isUploading, setIsUploading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [avatarUrl, setAvatarUrl] = useState("");
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [submitError, setSubmitError] = useState("");
+  const [submitSuccess, setSubmitSuccess] = useState("");
 
   const onFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const picked = event.target.files?.[0];
     if (!picked) return;
 
     try {
+      setSubmitError("");
       const resizedImageUrl = await resizeImage(picked);
-      setFile(new File([await (await fetch(resizedImageUrl)).blob()], picked.name));
+      const blob = await (await fetch(resizedImageUrl)).blob();
+      setFile(new File([blob], picked.name, { type: picked.type || "image/jpeg" }));
       setAvatarUrl(resizedImageUrl);
     } catch (error) {
       console.error("onFileChange - Erro", error);
+      setSubmitError("Não foi possível processar a foto selecionada.");
     }
   };
 
   useEffect(() => {
-    fetchModalidades();
+    fetchModalidades().catch(console.error);
   }, [fetchModalidades]);
 
-  // ----------------------------------------------------------------------------
-  // seleção de modalidades
   const [selecoes, setSelecoes] = useState<SelecaoWithLock[]>([
     {
       modalidade: "",
@@ -110,7 +180,6 @@ export default function StudentRegistration() {
     },
   ]);
 
-  // Checkbox para forçar turma feminina específica
   const [forceFutsalFeminino, setForceFutsalFeminino] = useState<boolean>(false);
 
   const forcedSelection = useMemo<SelecaoWithLock>(
@@ -132,7 +201,6 @@ export default function StudentRegistration() {
   const isEmptySelection = (s: SelecaoWithLock) =>
     !s.locked && s.modalidade === "" && s.nucleo === "" && s.turma === "";
 
-  // Ao marcar/desmarcar: adiciona/remove linha travada
   useEffect(() => {
     setSelecoes((prev) => {
       const hasLockedForced = prev.some(isForced);
@@ -142,7 +210,6 @@ export default function StudentRegistration() {
 
         if (hasLockedForced) return next;
 
-        // Se usuário já escolheu essa turma manualmente, "promove" para locked
         const idxManual = next.findIndex(
           (s) =>
             s.modalidade.trim().toLowerCase() === FORCED_FUTSAL_MODALIDADE &&
@@ -167,10 +234,8 @@ export default function StudentRegistration() {
         return [forcedSelection, ...next];
       }
 
-      // desmarcado: remove apenas a seleção travada (se existir)
       const cleaned = prev.filter((s) => !isForced(s));
 
-      // garante pelo menos 1 linha editável
       if (cleaned.length === 0) {
         return [
           { modalidade: "", nucleo: "", turma: "", turmasDisponiveis: [] },
@@ -181,7 +246,6 @@ export default function StudentRegistration() {
     });
   }, [forceFutsalFeminino, forcedSelection]);
 
-  // Função para adicionar nova seleção de modalidade e turma
   const adicionarSelecao = () => {
     setSelecoes((prevSelecoes) => [
       ...prevSelecoes,
@@ -194,7 +258,14 @@ export default function StudentRegistration() {
     ]);
   };
 
-  // Função para atualizar seleções de modalidade, núcleo e turma
+  const atualizarTurmasDisponiveis = (modalidade: string, nucleo: string): Turma[] => {
+    if (nucleo === HIDDEN_NUCLEO) return [];
+    const turmas = modalidades.find((m) => m.nome === modalidade)?.turmas ?? [];
+    return turmas.filter(
+      (turma) => turma.nucleo === nucleo && turma.nucleo !== HIDDEN_NUCLEO
+    );
+  };
+
   const atualizarSelecao = (
     index: number,
     campo: keyof SelecaoModalidadeTurma,
@@ -203,8 +274,6 @@ export default function StudentRegistration() {
     setSelecoes((prevSelecoes) => {
       return prevSelecoes.map((selecao, idx) => {
         if (idx !== index) return selecao;
-
-        // Não permite editar a seleção travada
         if (selecao.locked) return selecao;
 
         if (campo === "turmasDisponiveis" && Array.isArray(valor)) {
@@ -215,7 +284,6 @@ export default function StudentRegistration() {
           const novaSelecao: SelecaoWithLock = { ...selecao, [campo]: valor };
 
           if (campo === "nucleo") {
-            // Bloqueio adicional (defesa): não permitir núcleo interno via estado
             if (valor === HIDDEN_NUCLEO) {
               novaSelecao.nucleo = "";
               novaSelecao.turma = "";
@@ -223,9 +291,8 @@ export default function StudentRegistration() {
               return novaSelecao;
             }
 
-            const modalidadeSelecionada = novaSelecao.modalidade;
             const turmasFiltradas = atualizarTurmasDisponiveis(
-              modalidadeSelecionada,
+              novaSelecao.modalidade,
               valor
             );
             novaSelecao.turmasDisponiveis = turmasFiltradas;
@@ -245,27 +312,17 @@ export default function StudentRegistration() {
     });
   };
 
-  const atualizarTurmasDisponiveis = (modalidade: string, nucleo: string): Turma[] => {
-    // Núcleo interno: nunca disponibiliza turmas no cadastro
-    if (nucleo === HIDDEN_NUCLEO) return [];
-
-    const turmas = modalidades.find((m) => m.nome === modalidade)?.turmas ?? [];
-    return turmas.filter((turma) => turma.nucleo === nucleo && turma.nucleo !== HIDDEN_NUCLEO);
-  };
-
   const removerSelecao = (index: number) => {
     setSelecoes((prevSelecoes) => {
       const target = prevSelecoes[index];
-      if (target?.locked) return prevSelecoes; // não remove travada
+      if (target?.locked) return prevSelecoes;
       return prevSelecoes.filter((_, idx) => idx !== index);
     });
   };
 
-  // Função para gerar os seletores de modalidade, núcleo e turma
   const renderizarSeletores = () => {
     return selecoes.map((selecao, index) => (
-      <Grid container spacing={2} key={index}>
-        {/* Modalidade */}
+      <Grid container spacing={2} key={`${selecao.modalidade}-${selecao.turma}-${index}`}>
         <Grid item xs={12} sm={4}>
           {selecao.locked ? (
             <TextField
@@ -303,7 +360,6 @@ export default function StudentRegistration() {
           )}
         </Grid>
 
-        {/* Núcleo */}
         <Grid item xs={12} sm={4}>
           {selecao.locked ? (
             <TextField
@@ -331,7 +387,7 @@ export default function StudentRegistration() {
                   ?.turmas.map((turma) => turma.nucleo)
                   .filter((nucleo): nucleo is string => Boolean(nucleo))
                   .filter((nucleo, idx, self) => self.indexOf(nucleo) === idx)
-                  .filter((nucleo) => nucleo !== HIDDEN_NUCLEO) // <-- remove núcleo interno
+                  .filter((nucleo) => nucleo !== HIDDEN_NUCLEO)
                   .map((nucleo) => (
                     <MenuItem key={nucleo} value={nucleo}>
                       {nucleo}
@@ -341,7 +397,6 @@ export default function StudentRegistration() {
           )}
         </Grid>
 
-        {/* Turma */}
         <Grid item xs={12} sm={4}>
           {selecao.locked ? (
             <TextField
@@ -390,18 +445,20 @@ export default function StudentRegistration() {
   };
 
   const onSubmit: SubmitHandler<FormValuesStudent> = async (formData) => {
+    setSubmitError("");
+    setSubmitSuccess("");
+
     if (selecoes.length === 0) {
-      alert("Por favor, adicione pelo menos uma modalidade e turma.");
+      setSubmitError("Por favor, adicione pelo menos uma modalidade e turma.");
       return;
     }
 
-    // Se checkbox marcado, valida isFeminina quando possível
     if (forceFutsalFeminino) {
       const futsal = modalidades.find((m) => m.nome === FORCED_FUTSAL_MODALIDADE);
       const turma = futsal?.turmas?.find((t) => t.nome_da_turma === FORCED_FUTSAL_TURMA);
 
       if (turma && turma.isFeminina !== true) {
-        alert(
+        setSubmitError(
           "Configuração inválida: a turma feminina selecionada não está marcada como isFeminina=true no banco."
         );
         return;
@@ -411,42 +468,29 @@ export default function StudentRegistration() {
     let fotoUrl = "";
     if (file) {
       setIsUploading(true);
-      try {
-        const fileName = uuidv4() + file.name;
-        const fileRef = ref(storage, fileName);
-        const uploadTask = uploadBytesResumable(fileRef, file);
+      setUploadProgress(0);
 
-        await new Promise<void>((resolve, reject) => {
-          uploadTask.on(
-            "state_changed",
-            () => {},
-            (error) => {
-              console.error("Erro no upload:", error);
-              reject(error);
-            },
-            async () => {
-              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-              setIsUploading(false);
-              fotoUrl = downloadURL;
-              resolve();
-            }
-          );
-        });
+      try {
+        fotoUrl = await uploadFileWithTimeout(file, setUploadProgress);
       } catch (error) {
         console.error("Falha no upload:", error);
+        setSubmitError(
+          error instanceof Error
+            ? error.message
+            : "Falha no upload da foto. Tente novamente."
+        );
         setIsUploading(false);
         return;
+      } finally {
+        setIsUploading(false);
       }
     }
 
     const mydate = new Date(Date.now()).toLocaleString().split(",")[0];
-    const uniforme = false;
-
     formData.aluno.dataMatricula = mydate;
-    formData.aluno.informacoesAdicionais.hasUniforme = uniforme;
+    formData.aluno.informacoesAdicionais.hasUniforme = false;
     formData.aluno.informacoesAdicionais.IdentificadorUnico = uuidv4();
 
-    // Seleções efetivas: remove linhas vazias e garante forced se marcado
     const baseSelecoes = selecoes
       .filter((s) => s.modalidade && s.turma)
       .map((s) => ({
@@ -482,26 +526,37 @@ export default function StudentRegistration() {
     }));
 
     try {
-      const { resultados } = await sendDataToApi(dataParaProcessar);
+      const response = await axios.post<SubmitResponse>(
+        "/api/SubmitFormRegistration",
+        dataParaProcessar,
+        {
+          timeout: SUBMIT_TIMEOUT_MS,
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const { resultados } = response.data;
       const todosSucessos = resultados.every((resultado) => resultado.sucesso);
 
       if (todosSucessos) {
-        alert("Todos os cadastros foram efetuados com sucesso!");
+        setSubmitSuccess("Todos os cadastros foram efetuados com sucesso!");
         resetFormulario();
       } else {
         const mensagensErro = resultados
           .filter((resultado) => !resultado.sucesso)
           .map((resultado) => resultado.erro)
           .join("\n");
-        alert(`O cadastro falhou, motivo:\n${mensagensErro}`);
+
+        setSubmitError(`O cadastro falhou:\n${mensagensErro}`);
       }
     } catch (error) {
-      console.error("Erro ao enviar dados dos alunos: ", error);
-      alert("Ocorreu um erro ao tentar realizar o cadastro. Por favor, tente novamente.");
+      console.error("Erro ao enviar dados dos alunos:", error);
+      setSubmitError(getAxiosErrorMessage(error));
     }
   };
 
-  // Função para resetar o formulário e estados relacionados
   const resetFormulario = () => {
     reset();
     setSelecoes([{ modalidade: "", nucleo: "", turma: "", turmasDisponiveis: [] }]);
@@ -513,6 +568,12 @@ export default function StudentRegistration() {
     CorrigirDadosDefinitivos();
   };
 
+  const submitButtonLabel = isUploading
+    ? `Enviando foto (${uploadProgress}%)...`
+    : isSubmitting
+    ? "Enviando cadastro..."
+    : "Cadastrar Atleta";
+
   return (
     <Layout>
       <Container>
@@ -521,6 +582,18 @@ export default function StudentRegistration() {
             <Box sx={{ display: "table", width: "100%" }}>
               <HeaderForm titulo={"Cadastro de Atletas"} />
             </Box>
+
+            {submitError && (
+              <Alert severity="error" sx={{ mb: 2, whiteSpace: "pre-line" }}>
+                {submitError}
+              </Alert>
+            )}
+
+            {submitSuccess && (
+              <Alert severity="success" sx={{ mb: 2 }}>
+                {submitSuccess}
+              </Alert>
+            )}
 
             <List sx={ListStyle}>
               <Typography sx={TituloSecaoStyle}>
@@ -700,7 +773,7 @@ export default function StudentRegistration() {
                 <Grid item xs={12}>
                   <TextField
                     select
-                    defaultValue={""}
+                    defaultValue=""
                     label="Tamanho do Uniforme"
                     variant="outlined"
                     fullWidth
@@ -745,7 +818,7 @@ export default function StudentRegistration() {
                       />
                     }
                     label="Turma feminina (Futsal - Leonor Rosa)"
-                    sx={{color:"black"}}
+                    sx={{ color: "black" }}
                   />
                 </Grid>
 
@@ -800,7 +873,7 @@ export default function StudentRegistration() {
                     <RadioGroup row aria-labelledby={id} {...register(id as keyof FormValuesStudent)}>
                       {opcoesTermosAvisos[id.split(".")[2]].map((opcao, index) => (
                         <FormControlLabel
-                          key={index}
+                          key={`${id}-${index}`}
                           value={opcao}
                           control={<Radio required />}
                           label={opcao}
@@ -823,7 +896,7 @@ export default function StudentRegistration() {
                 variant="contained"
                 disabled={isSubmitting || isUploading || avatarUrl === ""}
               >
-                {isSubmitting || isUploading ? "Enviando dados, aguarde..." : "Cadastrar Atleta"}
+                {submitButtonLabel}
               </Button>
             )}
           </Box>
@@ -832,3 +905,4 @@ export default function StudentRegistration() {
     </Layout>
   );
 }
+
