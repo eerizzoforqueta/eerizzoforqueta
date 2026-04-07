@@ -137,6 +137,7 @@ export default function ManageTurmas() {
       'SUB07_SUB09',
       'SUB09_SUB11',
       'SUB13_SUB15',
+      "ADULTO_(LIVRE)"
     ],
     []
   );
